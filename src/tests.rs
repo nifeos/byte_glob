@@ -348,20 +348,20 @@ fn the_worst_case_over_the_proof_domain_is_what_the_unwind_bounds_are_set_from()
 fn the_pathological_pattern_stays_inside_its_bound() {
     // 100,000 bytes native, where a quadratic matcher would show; 2,000 under Miri, which
     // cannot afford ~4M matcher steps. Both assertions run at both sizes.
-    const NAME_LEN: usize = if cfg!(miri) { 2_000 } else { 100_000 };
-    let name = [b'a'; NAME_LEN];
+    const NAME_BYTES: usize = if cfg!(miri) { 2_000 } else { 100_000 };
+    let name = [b'a'; NAME_BYTES];
     let pattern = b"a*a*a*a*a*a*a*a*a*a*b";
     let (hit, steps) = match_steps(pattern, &name[..], LeadingDot::Ordinary);
     assert!(!hit);
     assert!(
-        steps <= step_bound(pattern.len(), NAME_LEN),
+        steps <= step_bound(pattern.len(), NAME_BYTES),
         "{steps} steps exceeded the bound {}",
-        step_bound(pattern.len(), NAME_LEN)
+        step_bound(pattern.len(), NAME_BYTES)
     );
 
     // The measured cost is linear-ish in practice, far under the quadratic bound. Asserted
     // loosely, because the point is the order of magnitude: a bomb would be off by many.
-    assert!(steps < 40 * NAME_LEN, "{steps} steps is not linear-ish");
+    assert!(steps < 40 * NAME_BYTES, "{steps} steps is not linear-ish");
 }
 
 /// The other shape of the same attack: many `?` after a star, and a name that nearly matches.
@@ -370,16 +370,16 @@ fn the_pathological_pattern_stays_inside_its_bound() {
 fn a_star_followed_by_a_long_tail_stays_polynomial() {
     // Shrunk under Miri like the test above: this one is genuinely quadratic, so its native
     // 2,000 x 512 is ~1M matcher steps, minutes under an interpreter that add no new paths.
-    const NAME_LEN: usize = if cfg!(miri) { 200 } else { 2_000 };
-    const PATTERN_LEN: usize = if cfg!(miri) { 64 } else { 512 };
-    let name = [b'a'; NAME_LEN];
-    let mut pattern = [b'?'; PATTERN_LEN];
+    const NAME_BYTES: usize = if cfg!(miri) { 200 } else { 2_000 };
+    const PATTERN_BYTES: usize = if cfg!(miri) { 64 } else { 512 };
+    let name = [b'a'; NAME_BYTES];
+    let mut pattern = [b'?'; PATTERN_BYTES];
     pattern[0] = b'*';
-    pattern[PATTERN_LEN - 1] = b'b';
+    pattern[PATTERN_BYTES - 1] = b'b';
 
     let (hit, steps) = match_steps(&pattern[..], &name[..], LeadingDot::Ordinary);
     assert!(!hit);
-    assert!(steps <= step_bound(pattern.len(), NAME_LEN));
+    assert!(steps <= step_bound(pattern.len(), NAME_BYTES));
 }
 
 /// Every unterminated bracket in a long pattern rescans to the end, which is the one place the

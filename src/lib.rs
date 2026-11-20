@@ -1,6 +1,6 @@
 //! **glob: does this pattern match this name?** An `fnmatch(3)`-style matcher for one file name. It
-//! is a total function on two byte strings: no IO, no allocation, no `unsafe`, a cost bound a caller
-//! can compute before matching, and Kani proofs of the corners. See the README.
+//! is a total function on two byte strings: no input or output, no allocation, no `unsafe`, a cost
+//! bound a caller can compute before matching, and Kani proofs of the corners. See the README.
 //!
 //! Three things a caller does not guess:
 //!
