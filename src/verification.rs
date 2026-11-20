@@ -69,6 +69,8 @@ fn the_cost_never_exceeds_the_bound() {
 /// **A pattern with no magic in it matches exactly one name: itself, unescaped**, over every
 /// pattern of up to three arbitrary bytes, escape corners and unterminated brackets included.
 /// The shell's grant planner rests on it: if [`has_magic`] says no, it asks for one name.
+/// Stated with [`LeadingDot::Ordinary`], as the next two harnesses are; the leading-dot policy has
+/// its own harness, and a symbolic choice here doubled the solver's time.
 #[kani::proof]
 #[kani::unwind(11)]
 fn no_magic_means_the_pattern_is_its_own_only_match() {
@@ -82,7 +84,7 @@ fn no_magic_means_the_pattern_is_its_own_only_match() {
     kani::assume(!has_magic(p));
     let mut buf = [0u8; P];
     let lit = literal(p, &mut buf).expect("a magic-free pattern always has a literal");
-    assert_eq!(matches_with(p, n, any_dot()), n == lit);
+    assert_eq!(matches_with(p, n, LeadingDot::Ordinary), n == lit);
 }
 
 /// Falsification: replayable `falsifications/verification.star_matches_anything_and_question_matches_one_byte.patch`

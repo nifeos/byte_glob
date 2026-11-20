@@ -1,4 +1,4 @@
-Falsifies `glob::verification::the_cost_never_exceeds_the_bound`.
+Falsifies `byte_glob::verification::the_cost_never_exceeds_the_bound`.
 
 The defect: `step_bound` loses its dependence on the name length: the backtracking term is dropped, so a
 pattern that backtracks across a long name is charged as though it never did.

@@ -1,6 +1,6 @@
 //! **glob: does this pattern match this name?** An `fnmatch(3)`-style matcher for one file name. It
-//! is a total function on two byte strings: no IO, no allocation, no `unsafe`, a cost bound a caller
-//! can compute before matching, and Kani proofs of the corners. See the README.
+//! is a total function on two byte strings: no input or output, no allocation, no `unsafe`, a cost
+//! bound a caller can compute before matching, and Kani proofs of the corners. See the README.
 //!
 //! Three things a caller does not guess:
 //!
@@ -359,7 +359,7 @@ fn class_at(pattern: &[u8], open: usize, c: u8) -> (Option<(bool, usize)>, usize
         at_start = false;
 
         // An escape inside a class, which is how `[\]]` names a `]`. Strict POSIX bracket
-        // expressions have no escapes; glibc's fnmatch and bash both honour one, and matching them
+        // expressions have no escapes; glibc's fnmatch and bash both honor one, and matching them
         // is worth more than matching the standard nobody implements.
         let (lo, after_lo) = if byte == b'\\' && k + 1 < pattern.len() {
             scanned += 1;
