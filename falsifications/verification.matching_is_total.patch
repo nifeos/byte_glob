@@ -1,0 +1,18 @@
+Falsifies `byte_glob::verification::matching_is_total`.
+
+The defect: the backtrack no longer advances `star_absorbed`, so the retry resumes at the same name position
+with the same pattern position. A pattern like `*a` against `b` loops forever.
+
+Expected to fail: the unwinding assertion on the match loop in `match_steps`, reached through the harness's `match_steps` call: the loop no longer runs out of work.
+
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -231,7 +231,6 @@
+             // Retry with the last `*` absorbing one more byte. `star_absorbed` only ever grows, and
+             // it is bounded by the name's length, which is what makes the total work polynomial.
+             Some(resume) => {
+-                star_absorbed += 1;
+                 i = star_absorbed;
+                 j = resume;
+                 steps += 1;

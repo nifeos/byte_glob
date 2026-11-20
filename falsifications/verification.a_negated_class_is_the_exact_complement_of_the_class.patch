@@ -1,0 +1,19 @@
+Falsifies `byte_glob::verification::a_negated_class_is_the_exact_complement_of_the_class`.
+
+The defect: `class_at` consumes the `!` of `[!...]` but never applies the negation, so `[!ab]` matches exactly
+what `[ab]` matches.
+
+Expected to fail: the harness's `assert_eq!(matches_with(&plain, ..), !matches_with(&negated, ..))`.
+
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -354,7 +354,7 @@
+         };
+         scanned += 1;
+         if byte == b']' && !at_start {
+-            return (Some((hit ^ negated, k + 1)), scanned);
++            return (Some((hit, k + 1)), scanned);
+         }
+         at_start = false;
+ 

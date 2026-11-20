@@ -1,0 +1,18 @@
+Falsifies `byte_glob::verification::star_matches_anything_and_question_matches_one_byte`.
+
+The defect: once the name is spent, the matcher skips `?` as well as `*`, so `?` matches the empty name.
+
+Expected to fail: the harness's `assert_eq!(matches_with(b"?", n, LeadingDot::Ordinary), nlen == 1)` at `nlen == 0`.
+
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -176,7 +176,7 @@
+             // The name is spent. Nothing can be gained by backtracking, since that only makes the
+             // `*` absorb more of a name that has no more bytes, so the answer is fixed: whatever is
+             // left of the pattern has to be able to match emptiness, and only `*` can.
+-            while pattern.get(j) == Some(&b'*') {
++            while matches!(pattern.get(j), Some(&b'*') | Some(&b'?')) {
+                 j += 1;
+                 steps += 1;
+             }

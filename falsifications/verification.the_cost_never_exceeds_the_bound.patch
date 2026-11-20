@@ -1,0 +1,23 @@
+Falsifies `glob::verification::the_cost_never_exceeds_the_bound`.
+
+The defect: `step_bound` loses its dependence on the name length: the backtracking term is dropped, so a
+pattern that backtracks across a long name is charged as though it never did.
+
+Expected to fail: the harness's `assert!(steps <= step_bound(plen, nlen))`.
+
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -252,10 +252,8 @@
+     let iterations = name_bytes
+         .saturating_add(2)
+         .saturating_mul(name_bytes.saturating_add(pattern_bytes).saturating_add(1));
+-    iterations
+-        .saturating_mul(pattern_bytes.saturating_mul(2).saturating_add(2))
+-        .saturating_add(pattern_bytes)
+-        .saturating_add(2)
++    let _ = iterations;
++    pattern_bytes.saturating_add(2).saturating_add(0 * name_bytes)
+ }
+ 
+ // ---- the pattern's elements ------------------------------------------------------------------

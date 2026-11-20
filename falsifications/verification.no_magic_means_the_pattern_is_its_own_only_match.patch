@@ -1,0 +1,20 @@
+Falsifies `glob::verification::no_magic_means_the_pattern_is_its_own_only_match`.
+
+The defect: `literal` copies the pattern byte at the escape rather than the byte the escape names, so `\*`
+comes out as a backslash while the matcher still treats it as `*`.
+
+Expected to fail: the harness's `assert_eq!(matches_with(p, n, LeadingDot::Ordinary), n == lit)`.
+
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -132,7 +132,8 @@
+     while let Some((elem, _)) = decode(pattern, j, 0) {
+         match elem {
+             Element::Byte { byte, next } => {
+-                *out.get_mut(n)? = byte;
++                let _ = byte;
++                *out.get_mut(n)? = pattern[j];
+                 n += 1;
+                 j = next;
+             }
