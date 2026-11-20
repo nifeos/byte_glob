@@ -1,4 +1,4 @@
-Falsifies `glob::verification::no_magic_means_the_pattern_is_its_own_only_match`.
+Falsifies `byte_glob::verification::no_magic_means_the_pattern_is_its_own_only_match`.
 
 The defect: `literal` copies the pattern byte at the escape rather than the byte the escape names, so `\*`
 comes out as a backslash while the matcher still treats it as `*`.
