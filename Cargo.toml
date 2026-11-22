@@ -18,6 +18,11 @@ include = ["src/**", "falsifications/**", "README.md", "LICENSE-*"]
 
 [dependencies]
 
+# The measurements behind the README's throughput figures: `cargo bench`. Standard library only.
+[[bench]]
+name = "matching"
+harness = false
+
 [lints.rust]
 # `cfg(kani)` is set by the Kani model checker, which proves this crate's harnesses.
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }

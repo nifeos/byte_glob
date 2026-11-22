@@ -76,6 +76,12 @@ in the two lengths with no term in the number of `*`s. `has_magic` and `literal`
 `match_steps`: each decodes a `[` by scanning to its closing `]`, so `n` unterminated brackets cost
 about `n * n / 2` byte reads.
 
+`cargo bench` runs the three shapes that make a backtracking matcher blow up (ten stars and no
+match across 4,096 bytes, a star before a 63-byte tail, 256 unterminated brackets) and one
+ordinary pattern. For each it prints the time a match takes, its step count beside `step_bound`,
+and the time a step takes, so a step that got slower shows where the count cannot. The times
+belong to the machine that runs it, so this README states none.
+
 ## Corners
 
 Every row is a place a real implementation has been wrong, and a test pins it.
