@@ -98,6 +98,7 @@ Every row is a place a real implementation has been wrong, and a test pins it.
 cargo test
 cargo build --lib --target x86_64-unknown-none   # also aarch64-unknown-none-softfloat, riscv64imac-unknown-none-elf
 cargo kani
+cargo +nightly fuzz run byte_glob_matches   # cargo-fuzz; checks against a separately written matcher
 ```
 
 ## BUGS
