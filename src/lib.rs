@@ -85,7 +85,7 @@ pub enum LeadingDot {
 /// assert_eq!(literal(b"*.txt", &mut buf), None); // it has magic; expand it instead
 /// ```
 pub fn matches(pattern: &[u8], name: &[u8]) -> bool {
-    match_steps(pattern, name, LeadingDot::Special).0
+    match_steps(pattern, name, LeadingDot::Special).matched
 }
 
 /// [`matches()`], with the leading-dot rule under the caller's control.
@@ -100,7 +100,7 @@ pub fn matches(pattern: &[u8], name: &[u8]) -> bool {
 /// assert!(matches_with(b"*", b".config", LeadingDot::Ordinary));    // ... unless you ask otherwise
 /// ```
 pub fn matches_with(pattern: &[u8], name: &[u8], dot: LeadingDot) -> bool {
-    match_steps(pattern, name, dot).0
+    match_steps(pattern, name, dot).matched
 }
 
 /// **Could this pattern match anything other than one fixed name?**
@@ -142,14 +142,37 @@ pub fn literal<'a>(pattern: &[u8], out: &'a mut [u8]) -> Option<&'a [u8]> {
     Some(&out[..n])
 }
 
+/// What [`match_steps`] found: the answer, and what it cost.
+///
+/// `#[non_exhaustive]`, so a later version can report more about a match without breaking a
+/// caller that reads these two fields.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[non_exhaustive]
+pub struct Outcome {
+    /// Whether the pattern matched the name: what [`matches_with`] returns for the same arguments.
+    pub matched: bool,
+    /// The steps the match took. A step is one byte of pattern examined, including the bytes a
+    /// bracket expression is scanned over and the ones re-examined after a backtrack; it is not a
+    /// wall-clock measure. The one promise about it is that it is at most [`step_bound`] of the
+    /// two lengths. Its exact value is not promised across versions.
+    pub steps: usize,
+}
+
 /// [`matches_with`], plus the number of steps it took: the cost of the match, made observable.
 ///
-/// A "step" is one byte of pattern examined, including the bytes a bracket expression is scanned
-/// over and the ones re-examined after a backtrack. It is not a wall-clock measure. The one
-/// promise about the count is that it is at most [`step_bound`] of the two lengths; its exact value
-/// is not promised across versions. It exists so the claim "this cannot blow up" is an
-/// inequality something checks rather than a paragraph, by way of [`step_bound`].
-pub fn match_steps(pattern: &[u8], name: &[u8], dot: LeadingDot) -> (bool, usize) {
+/// It exists so the claim "this cannot blow up" is an inequality something checks rather than a
+/// paragraph: [`Outcome::steps`] is at most [`step_bound`] of the two lengths.
+///
+/// # Examples
+///
+/// ```
+/// use byte_glob::{match_steps, step_bound, LeadingDot};
+///
+/// let outcome = match_steps(b"a*a*b", b"aaaa", LeadingDot::Special);
+/// assert!(!outcome.matched);
+/// assert!(outcome.steps <= step_bound(5, 4));
+/// ```
+pub fn match_steps(pattern: &[u8], name: &[u8], dot: LeadingDot) -> Outcome {
     let mut steps = 0usize;
 
     // The leading-dot rule, applied once and up front. It is a property of the two strings' first
@@ -158,7 +181,10 @@ pub fn match_steps(pattern: &[u8], name: &[u8], dot: LeadingDot) -> (bool, usize
         && name.first() == Some(&b'.')
         && !opens_with_a_literal_dot(pattern)
     {
-        return (false, steps);
+        return Outcome {
+            matched: false,
+            steps,
+        };
     }
 
     let n = name.len();
@@ -180,7 +206,10 @@ pub fn match_steps(pattern: &[u8], name: &[u8], dot: LeadingDot) -> (bool, usize
                 j += 1;
                 steps += 1;
             }
-            return (j == pattern.len(), steps);
+            return Outcome {
+                matched: j == pattern.len(),
+                steps,
+            };
         }
 
         let advanced = match decode(pattern, j, name[i]) {
@@ -236,7 +265,12 @@ pub fn match_steps(pattern: &[u8], name: &[u8], dot: LeadingDot) -> (bool, usize
                 j = resume;
                 steps += 1;
             }
-            None => return (false, steps),
+            None => {
+                return Outcome {
+                    matched: false,
+                    steps,
+                };
+            }
         }
     }
 }

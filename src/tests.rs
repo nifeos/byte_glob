@@ -321,7 +321,7 @@ fn the_worst_case_over_the_proof_domain_is_what_the_unwind_bounds_are_set_from()
                     }
                     let bucket = plen.max(nlen);
                     for dot in [LeadingDot::Special, LeadingDot::Ordinary] {
-                        let (_, steps) = match_steps(&pattern[..plen], &name[..nlen], dot);
+                        let steps = match_steps(&pattern[..plen], &name[..nlen], dot).steps;
                         worst[bucket] = worst[bucket].max(steps);
                     }
                 }
@@ -351,7 +351,8 @@ fn the_pathological_pattern_stays_inside_its_bound() {
     const NAME_BYTES: usize = if cfg!(miri) { 2_000 } else { 100_000 };
     let name = [b'a'; NAME_BYTES];
     let pattern = b"a*a*a*a*a*a*a*a*a*a*b";
-    let (hit, steps) = match_steps(pattern, &name[..], LeadingDot::Ordinary);
+    let outcome = match_steps(pattern, &name[..], LeadingDot::Ordinary);
+    let (hit, steps) = (outcome.matched, outcome.steps);
     assert!(!hit);
     assert!(
         steps <= step_bound(pattern.len(), NAME_BYTES),
@@ -377,7 +378,8 @@ fn a_star_followed_by_a_long_tail_stays_polynomial() {
     pattern[0] = b'*';
     pattern[PATTERN_BYTES - 1] = b'b';
 
-    let (hit, steps) = match_steps(&pattern[..], &name[..], LeadingDot::Ordinary);
+    let outcome = match_steps(&pattern[..], &name[..], LeadingDot::Ordinary);
+    let (hit, steps) = (outcome.matched, outcome.steps);
     assert!(!hit);
     assert!(steps <= step_bound(pattern.len(), NAME_BYTES));
 }
@@ -388,7 +390,8 @@ fn a_star_followed_by_a_long_tail_stays_polynomial() {
 fn a_pattern_full_of_open_brackets_stays_inside_its_bound() {
     let pattern = [b'['; 400];
     let name = [b'['; 400];
-    let (hit, steps) = match_steps(&pattern[..], &name[..], LeadingDot::Ordinary);
+    let outcome = match_steps(&pattern[..], &name[..], LeadingDot::Ordinary);
+    let (hit, steps) = (outcome.matched, outcome.steps);
     assert!(hit);
     assert!(steps <= step_bound(pattern.len(), name.len()));
 }
@@ -405,8 +408,8 @@ fn the_step_bound_saturates() {
 /// above would pass on a counter that never moved.
 #[test]
 fn the_step_count_grows_with_the_work() {
-    let short = match_steps(b"*b", b"aaaa", LeadingDot::Ordinary).1;
-    let long = match_steps(b"*b", b"aaaaaaaaaaaaaaaa", LeadingDot::Ordinary).1;
+    let short = match_steps(b"*b", b"aaaa", LeadingDot::Ordinary).steps;
+    let long = match_steps(b"*b", b"aaaaaaaaaaaaaaaa", LeadingDot::Ordinary).steps;
     assert!(long > short);
     assert!(short > 0);
 }
@@ -425,7 +428,7 @@ fn the_step_count_grows_with_the_work() {
 /// member in front of the range separates them.
 #[test]
 fn each_class_feature_costs_its_own_scan() {
-    let steps = |p: &[u8], n: &[u8]| match_steps(p, n, LeadingDot::Special).1;
+    let steps = |p: &[u8], n: &[u8]| match_steps(p, n, LeadingDot::Special).steps;
     assert_eq!(
         steps(b"[!b]", b"a"),
         steps(b"[b]", b"b") + 1,

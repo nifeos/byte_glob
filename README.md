@@ -33,8 +33,9 @@ candidate, which is more authority than listing a directory) and no POSIX (Porta
 - `has_magic(pattern)` and `literal(pattern, out)`: is the word a pattern at all, and if not, what
   name is it with the escapes stripped. `literal` returns `None` rather than truncate.
 - `match_steps(pattern, name, dot)` and `step_bound(pattern_bytes, name_bytes)`: the cost of a
-  match, and the most it can be, computed from the two lengths alone. `match_steps` is at most
-  `step_bound`; its exact count is not promised across versions.
+  match, and the most it can be, computed from the two lengths alone. `match_steps` returns an
+  `Outcome` whose `matched` is the answer and whose `steps` is at most `step_bound`; the exact
+  count is not promised across versions.
 
 Syntax: `*` any run of bytes, `?` one byte, `[abc]` a set, `[a-z]` a range, `[!abc]` or `[^abc]` the
 complement, `\x` the byte `x`, anything else itself.
@@ -75,6 +76,12 @@ in the two lengths with no term in the number of `*`s. `has_magic` and `literal`
 `match_steps`: each decodes a `[` by scanning to its closing `]`, so `n` unterminated brackets cost
 about `n * n / 2` byte reads.
 
+`cargo bench` runs the three shapes that make a backtracking matcher blow up (ten stars and no
+match across 4,096 bytes, a star before a 63-byte tail, 256 unterminated brackets) and one
+ordinary pattern. For each it prints the time a match takes, its step count beside `step_bound`,
+and the time a step takes, so a step that got slower shows where the count cannot. The times
+belong to the machine that runs it, so this README states none.
+
 ## Corners
 
 Every row is a place a real implementation has been wrong, and a test pins it.
@@ -97,12 +104,12 @@ Every row is a place a real implementation has been wrong, and a test pins it.
 cargo test
 cargo build --lib --target x86_64-unknown-none   # also aarch64-unknown-none-softfloat, riscv64imac-unknown-none-elf
 cargo kani
+cargo +nightly fuzz run byte_glob_matches   # cargo-fuzz; checks against a separately written matcher
 ```
 
 ## BUGS
 
 - The harnesses do not quantify over length.
-- `match_steps` returns a tuple whose second value has no named type.
 
 ## Minimum Rust version
 

@@ -1,0 +1,26 @@
+# The cargo-fuzz target, in a workspace of its own so that `cargo build` and `cargo test` at the
+# root never build it. It needs nightly: `cargo +nightly fuzz run byte_glob_matches`.
+
+[package]
+name = "byte_glob-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.byte_glob]
+path = ".."
+
+[[bin]]
+name = "byte_glob_matches"
+path = "fuzz_targets/byte_glob_matches.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

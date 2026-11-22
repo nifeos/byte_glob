@@ -8,11 +8,11 @@ Expected to fail: the harness's `assert_eq!(special, ordinary)` for a name that 
 diff --git a/src/lib.rs b/src/lib.rs
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -155,7 +155,6 @@
+@@ -178,7 +178,6 @@
      // The leading-dot rule, applied once and up front. It is a property of the two strings' first
      // bytes, so putting it in the loop would only mean asking it repeatedly.
      if dot == LeadingDot::Special
 -        && name.first() == Some(&b'.')
          && !opens_with_a_literal_dot(pattern)
      {
-         return (false, steps);
+         return Outcome {
