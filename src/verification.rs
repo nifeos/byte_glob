@@ -61,7 +61,7 @@ fn the_cost_never_exceeds_the_bound() {
     let name: [u8; N] = kani::any();
     let (plen, nlen) = any_lengths();
 
-    let (_, steps) = match_steps(&pattern[..plen], &name[..nlen], any_dot());
+    let steps = match_steps(&pattern[..plen], &name[..nlen], any_dot()).steps;
     assert!(steps <= step_bound(plen, nlen));
 }
 

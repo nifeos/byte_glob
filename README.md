@@ -33,8 +33,9 @@ candidate, which is more authority than listing a directory) and no POSIX (Porta
 - `has_magic(pattern)` and `literal(pattern, out)`: is the word a pattern at all, and if not, what
   name is it with the escapes stripped. `literal` returns `None` rather than truncate.
 - `match_steps(pattern, name, dot)` and `step_bound(pattern_bytes, name_bytes)`: the cost of a
-  match, and the most it can be, computed from the two lengths alone. `match_steps` is at most
-  `step_bound`; its exact count is not promised across versions.
+  match, and the most it can be, computed from the two lengths alone. `match_steps` returns an
+  `Outcome` whose `matched` is the answer and whose `steps` is at most `step_bound`; the exact
+  count is not promised across versions.
 
 Syntax: `*` any run of bytes, `?` one byte, `[abc]` a set, `[a-z]` a range, `[!abc]` or `[^abc]` the
 complement, `\x` the byte `x`, anything else itself.
@@ -102,7 +103,6 @@ cargo kani
 ## BUGS
 
 - The harnesses do not quantify over length.
-- `match_steps` returns a tuple whose second value has no named type.
 
 ## Minimum Rust version
 
