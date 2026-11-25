@@ -1,9 +1,9 @@
 # byte_glob
 
-[![check](https://github.com/nifeos/byte_glob/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nifeos/byte_glob/actions/workflows/ci.yml?query=branch%3Amain)
-[![proofs](https://github.com/nifeos/byte_glob/actions/workflows/proofs.yml/badge.svg?branch=main)](https://github.com/nifeos/byte_glob/actions/workflows/proofs.yml?query=branch%3Amain)
-[![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/nifeos/byte_glob#license)
-[![minimum Rust version](https://img.shields.io/badge/rust-1.88%2B-blue.svg)](https://github.com/nifeos/byte_glob/blob/main/Cargo.toml)
+[![check](https://github.com/partsfoundry/byte_glob/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/partsfoundry/byte_glob/actions/workflows/ci.yml?query=branch%3Amain)
+[![proofs](https://github.com/partsfoundry/byte_glob/actions/workflows/proofs.yml/badge.svg?branch=main)](https://github.com/partsfoundry/byte_glob/actions/workflows/proofs.yml?query=branch%3Amain)
+[![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/partsfoundry/byte_glob#license)
+[![minimum Rust version](https://img.shields.io/badge/rust-1.88%2B-blue.svg)](https://github.com/partsfoundry/byte_glob/blob/main/Cargo.toml)
 
 An `fnmatch(3)`-style matcher for one file name. A pattern and a name go in, a `bool` comes out. It
 is a total function on two byte strings: `no_std`, no allocation, no `unsafe`, no dependency, a cost
