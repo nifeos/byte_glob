@@ -599,9 +599,15 @@ fn decode(pattern: &[u8], j: usize, c: u8, case: Case) -> Option<(Element, usize
             ),
         },
         b'[' => {
-            let (closed, scanned) = class_at(pattern, j, c, case);
+            let (closed, scanned) = class_at(pattern, j, c);
             match closed {
-                Some((hit, next)) => (Element::Class { hit, next }, scanned),
+                Some((hit, next)) => match case {
+                    Case::Sensitive => (Element::Class { hit, next }, scanned),
+                    Case::AsciiInsensitive => {
+                        let (hit, folding) = folded_class(pattern, j, c, hit);
+                        (Element::Class { hit, next }, scanned + folding)
+                    }
+                },
                 // No closing bracket anywhere, so it was never a bracket expression. The scan that
                 // established that is charged for; it is the one place a step costs more than O(1).
                 None => (
@@ -626,14 +632,7 @@ fn decode(pattern: &[u8], j: usize, c: u8, case: Case) -> Option<(Element, usize
 /// literal byte. `scanned` is charged either way. A `!` or `^` right after `[` negates; a `]` right
 /// after that is a member; a `-` is a range only before a byte that is not the terminator, so
 /// `[a-]` and `[-a]` both mean "a hyphen or an a".
-#[inline(always)]
-fn class_at(pattern: &[u8], open: usize, c: u8, case: Case) -> (Option<(bool, usize)>, usize) {
-    // Under a fold, the name's byte is a member when either case of it is. `other` is `c` itself
-    // for a byte that is not an ASCII letter, and under `Case::Sensitive`.
-    let other = match case {
-        Case::AsciiInsensitive => other_case(c),
-        Case::Sensitive => c,
-    };
+fn class_at(pattern: &[u8], open: usize, c: u8) -> (Option<(bool, usize)>, usize) {
     let mut k = open + 1;
     let negated = matches!(pattern.get(k), Some(b'!') | Some(b'^'));
     let mut scanned = 1usize;
@@ -677,17 +676,40 @@ fn class_at(pattern: &[u8], open: usize, c: u8, case: Case) -> (Option<(bool, us
             scanned += after_hi - after_lo;
             // A reversed range (`[z-a]`) is empty. POSIX calls it undefined; glibc makes it match
             // nothing, which is the answer that cannot surprise anyone into a larger grant.
-            if (lo <= c && c <= hi) || (lo <= other && other <= hi) {
+            if lo <= c && c <= hi {
                 hit = true;
             }
             k = after_hi;
         } else {
-            if lo == c || lo == other {
+            if lo == c {
                 hit = true;
             }
             k = after_lo;
         }
     }
+}
+
+/// Under the case fold, whether the bracket expression opened at `open` matches `c`, given that
+/// it answered `hit` for `c` itself, and what the second pass cost.
+///
+/// The name's byte is a member when either case of it is. `class_at` applies the negation, so a
+/// plain class asks whether either case hit, and a negated one whether neither was a member,
+/// which is both cases hitting the complement. A byte that is not an ASCII letter has no other
+/// case and costs no second pass.
+fn folded_class(pattern: &[u8], open: usize, c: u8, hit: bool) -> (bool, usize) {
+    let other = other_case(c);
+    if other == c {
+        return (hit, 0);
+    }
+    let (closed, scanned) = class_at(pattern, open, other);
+    let other_hit = closed.is_some_and(|(other_hit, _)| other_hit);
+    let negated = matches!(pattern.get(open + 1), Some(b'!') | Some(b'^'));
+    let folded = if negated {
+        hit && other_hit
+    } else {
+        hit || other_hit
+    };
+    (folded, scanned)
 }
 
 /// Does a literal byte of the pattern match this byte of the name, under this case rule?
