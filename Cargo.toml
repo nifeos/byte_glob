@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = ["no-std", "glob", "fnmatch", "pattern-matching"]
 categories = ["no-std", "algorithms", "filesystem"]
 publish = false     # not published yet: the crate waits for its first release
-include = ["src/**", "falsifications/**", "README.md", "LICENSE-*"]
+include = ["/src/**", "/falsifications/**", "/README.md", "/LICENSE-*"]
 
 # A pattern matcher, and only the matcher: a pattern and a name in, a yes or no out. No filesystem
 # access, no enumeration, no allocation and no dependency. The part of globbing that is pure
