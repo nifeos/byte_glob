@@ -1,6 +1,28 @@
-//! **glob: does this pattern match this name?** An `fnmatch(3)`-style matcher for one file name. It
-//! is a total function on two byte strings: no input or output, no allocation, no `unsafe`, a cost
-//! bound a caller can compute before matching, and Kani proofs of the corners. See the README.
+//! An `fnmatch(3)`-style glob matcher over bytes, for one file name.
+//!
+//! [`matches()`] answers whether a pattern matches a name. It is a total function on two byte
+//! strings: no input or output, no allocation, no `unsafe`, a cost bound a caller can compute
+//! before matching, and Kani proofs of the corners.
+//!
+//! # Examples
+//!
+//! ```
+//! use byte_glob::{matches, matches_with, Case, LeadingDot, MatchOptions, Pattern};
+//!
+//! assert!(matches(b"*.txt", b"notes.txt"));
+//! assert!(!matches(b"*", b".hidden")); // a leading dot needs a literal dot
+//! assert!(matches(b"*.txt", b"dir/notes.txt")); // one name: `/` is a byte
+//!
+//! let listing = MatchOptions::new()
+//!     .with_leading_dot(LeadingDot::Ordinary)
+//!     .with_case(Case::AsciiInsensitive);
+//! assert!(matches_with(b"*.txt", b".NOTES.TXT", listing));
+//!
+//! // One pattern, many names: prepare it once.
+//! let logs = Pattern::new(b"*.log");
+//! assert!(logs.matches(b"server.log"));
+//! assert!(!logs.matches(b"server.txt"));
+//! ```
 //!
 //! Three things a caller does not guess:
 //!
@@ -198,6 +220,18 @@ pub fn matches_with(pattern: &[u8], name: &[u8], options: MatchOptions) -> bool 
 ///
 /// Precise rather than eager, so an unterminated `[` is a literal byte: a false "yes" costs the
 /// shell a directory enumeration for a word that names one file.
+///
+/// # Examples
+///
+/// ```
+/// use byte_glob::has_magic;
+///
+/// assert!(has_magic(b"*.txt"));
+/// assert!(has_magic(b"log[0-9]"));
+/// assert!(!has_magic(b"notes.txt"));
+/// assert!(!has_magic(br"a\*b")); // an escaped `*` is a literal
+/// assert!(!has_magic(b"[foo")); // never closed, so a literal `[`
+/// ```
 pub fn has_magic(pattern: &[u8]) -> bool {
     let mut j = 0;
     while let Some((elem, _)) = decode(pattern, j, 0, Case::Sensitive) {
@@ -468,6 +502,24 @@ impl<'a> Pattern<'a> {
 /// one to test a bracket expression. Saturating, so absurd lengths give `usize::MAX` rather than a
 /// wrapped bound. Loose on purpose: the point is polynomial in both lengths with no term in the
 /// number of `*`s. The README, "How it avoids blowup", gives the argument.
+///
+/// # Examples
+///
+/// A caller that takes patterns from outside can refuse a pair whose worst case is past a budget,
+/// before matching:
+///
+/// ```
+/// use byte_glob::{match_steps, step_bound, MatchOptions};
+///
+/// const BUDGET: usize = 1_000_000;
+/// let (pattern, name) = (&b"*a*a*a*b"[..], &b"aaaaaaaaaaaaaaaa"[..]);
+/// let bound = step_bound(pattern.len(), name.len());
+/// assert!(bound <= BUDGET);
+/// assert!(match_steps(pattern, name, MatchOptions::new()).steps <= bound);
+///
+/// // Saturating: absurd lengths give the largest bound, not a wrapped one.
+/// assert_eq!(step_bound(usize::MAX, usize::MAX), usize::MAX);
+/// ```
 pub const fn step_bound(pattern_bytes: usize, name_bytes: usize) -> usize {
     let iterations = name_bytes
         .saturating_add(2)
@@ -647,6 +699,11 @@ fn opens_with_a_literal_dot(pattern: &[u8]) -> bool {
         Some((Element::Byte { byte: b'.', .. }, _))
     )
 }
+
+/// The README's examples, run as doctests so they cannot drift from the code.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
 
 #[cfg(test)]
 mod tests;

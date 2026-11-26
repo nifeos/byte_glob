@@ -7,7 +7,7 @@
 
 An `fnmatch(3)`-style matcher for one file name. A pattern and a name go in, a `bool` comes out. It
 is a total function on two byte strings: `no_std`, no allocation, no `unsafe`, no dependency, a cost
-bound a caller can compute before matching, and six Kani proofs of its corners.
+bound a caller can compute before matching, and eight Kani proofs of its corners.
 
 Three things a caller does not guess:
 
@@ -28,11 +28,17 @@ candidate, which is more authority than listing a directory) and no POSIX (Porta
 
 ## The contract
 
-- `matches(pattern, name)` and `matches_with(pattern, name, dot)`: does the pattern match the name.
-  `LeadingDot::Special` is the default; `LeadingDot::Ordinary` treats a leading `.` as any other byte.
+- `matches(pattern, name)` and `matches_with(pattern, name, options)`: does the pattern match the
+  name. `MatchOptions` holds the rules, and `MatchOptions::new()` and `MatchOptions::default()` are
+  both what `matches` uses. `with_leading_dot(LeadingDot::Ordinary)` treats a leading `.` as any
+  other byte, and `with_case(Case::AsciiInsensitive)` lets an ASCII letter match either case.
+- `Pattern::new(pattern)`: a pattern prepared once for many names. `Pattern::matches` and
+  `Pattern::matches_with` give the same answers as the functions above. The part after the last
+  `*` matches a fixed number of bytes, so a prepared pattern tests it against the end of the name
+  before any backtracking.
 - `has_magic(pattern)`: is the word a pattern at all. False means the pattern names exactly one
   file.
-- `match_steps(pattern, name, dot)` and `step_bound(pattern_bytes, name_bytes)`: the cost of a
+- `match_steps(pattern, name, options)` and `step_bound(pattern_bytes, name_bytes)`: the cost of a
   match, and the most it can be, computed from the two lengths alone. `match_steps` returns an
   `Outcome` whose `matched` is the answer and whose `steps` is at most `step_bound`; the exact
   count is not promised across versions.
@@ -43,12 +49,20 @@ complement, `\x` the byte `x`, anything else itself.
 ## EXAMPLES
 
 ```rust
-use byte_glob::{matches, matches_with, has_magic, LeadingDot};
+use byte_glob::{matches, matches_with, has_magic, Case, LeadingDot, MatchOptions, Pattern};
 
 assert!(matches(b"*.txt", b"notes.txt"));
 assert!(!matches(b"*", b".hidden"));
-assert!(matches_with(b"*", b".hidden", LeadingDot::Ordinary));
+let ordinary = MatchOptions::new().with_leading_dot(LeadingDot::Ordinary);
+assert!(matches_with(b"*", b".hidden", ordinary));
 assert!(matches(b"*.txt", b"dir/notes.txt")); // one name: `/` is a byte
+
+let folded = MatchOptions::new().with_case(Case::AsciiInsensitive);
+assert!(matches_with(b"*.txt", b"NOTES.TXT", folded));
+
+let logs = Pattern::new(b"*.log"); // one pattern, many names
+assert!(logs.matches(b"server.log"));
+assert!(!logs.matches(b"server.txt"));
 
 assert!(has_magic(b"*.txt"));
 assert!(!has_magic(br"a\*b"));
@@ -56,12 +70,13 @@ assert!(!has_magic(br"a\*b"));
 
 ## What is proven
 
-Six Kani harnesses (`src/verification.rs`), each with a falsification patch that turns it red.
+Eight Kani harnesses (`src/verification.rs`), each with a falsification patch that turns it red.
 They quantify over every byte value of patterns and names up to three bytes (2^48 pairs per
 harness) but not over length: four bytes each did not finish. Matching is total under
-both dot rules. The step count never exceeds `step_bound`. A pattern with no magic matches exactly
+every rule. The step count never exceeds `step_bound`. A pattern with no magic matches exactly
 itself. `*` and `?` have their base meanings. The dot rule touches only names that start with a
-dot. A negated class is the exact complement of its class. The length-independent claims are
+dot. A negated class is the exact complement of its class. Under the case fold, the case of the
+name's letters changes no answer. A prepared `Pattern` gives the same answer as `matches_with`. The length-independent claims are
 host tests: an exhaustive cross-check against a naive matcher over every pattern of up to five
 bytes and every name of up to three, and a 100,000-byte adversarial run held under the bound.
 
