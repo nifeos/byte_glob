@@ -6,9 +6,10 @@ rust-version = "1.88"
 description = "An fnmatch-style glob matcher over bytes for one file name: total, allocation-free, with a cost bound and Kani proofs"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/partsfoundry/byte_glob"
+documentation = "https://docs.rs/byte_glob"
 readme = "README.md"
 keywords = ["no-std", "glob", "fnmatch", "pattern-matching"]
-categories = ["no-std", "algorithms", "filesystem"]
+categories = ["no-std", "no-std::no-alloc", "algorithms", "filesystem"]
 publish = false     # not published yet: the crate waits for its first release
 include = ["/src/**", "/falsifications/**", "/README.md", "/LICENSE-*"]
 
