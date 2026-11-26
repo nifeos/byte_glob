@@ -23,7 +23,7 @@
 //! assert!(logs.matches(b"server.log"));
 //! assert!(!logs.matches(b"server.txt"));
 //! ```
-//!
+
 //! Three things a caller does not guess:
 //!
 //! - **Bytes, not characters.** The match is `fnmatch(3)` in the C locale, so `?` is one byte.
@@ -353,7 +353,7 @@ pub fn match_steps(pattern: &[u8], name: &[u8], options: MatchOptions) -> Outcom
                         true
                     }
                     Element::Byte { byte, next } => {
-                        if same_byte(byte, name[i], options.case) {
+                        if literal_matches(byte, name[i], options.case) {
                             i += 1;
                             j = next;
                             true
@@ -485,7 +485,11 @@ impl<'a> Pattern<'a> {
         for &c in tail_name {
             j = match decode(self.bytes, j, c, options.case) {
                 Some((Element::Any { next }, _)) => next,
-                Some((Element::Byte { byte, next }, _)) if same_byte(byte, c, options.case) => next,
+                Some((Element::Byte { byte, next }, _))
+                    if literal_matches(byte, c, options.case) =>
+                {
+                    next
+                }
                 Some((Element::Class { hit: true, next }, _)) => next,
                 _ => return false,
             };
@@ -672,7 +676,7 @@ fn class_at(pattern: &[u8], open: usize, c: u8, case: Case) -> (Option<(bool, us
 }
 
 /// Does a literal byte of the pattern match this byte of the name, under this case rule?
-fn same_byte(literal: u8, c: u8, case: Case) -> bool {
+fn literal_matches(literal: u8, c: u8, case: Case) -> bool {
     match case {
         Case::Sensitive => literal == c,
         Case::AsciiInsensitive => literal.eq_ignore_ascii_case(&c),

@@ -181,11 +181,11 @@ fn no_magic_means_the_literal_is_the_only_match() {
 /// cross-check below compares is therefore the **search strategy** and nothing else: if the two
 /// disagree, the greedy single-backtrack loop is wrong, not the syntax.
 fn naive_matches(pattern: &[u8], name: &[u8], j: usize, i: usize) -> bool {
-    naive_matches_under(pattern, name, j, i, Case::Sensitive)
+    matches_naively(pattern, name, j, i, Case::Sensitive)
 }
 
 /// [`naive_matches`] under a case rule.
-fn naive_matches_under(pattern: &[u8], name: &[u8], j: usize, i: usize, case: Case) -> bool {
+fn matches_naively(pattern: &[u8], name: &[u8], j: usize, i: usize, case: Case) -> bool {
     // Past the end of the name the byte does not matter: every arm that could read it returns
     // false first.
     let c = name.get(i).copied().unwrap_or(0);
@@ -196,7 +196,7 @@ fn naive_matches_under(pattern: &[u8], name: &[u8], j: usize, i: usize, case: Ca
         Element::Star => {
             let mut absorbed = i;
             loop {
-                if naive_matches_under(pattern, name, j + 1, absorbed, case) {
+                if matches_naively(pattern, name, j + 1, absorbed, case) {
                     return true;
                 }
                 if absorbed == name.len() {
@@ -206,13 +206,12 @@ fn naive_matches_under(pattern: &[u8], name: &[u8], j: usize, i: usize, case: Ca
             }
         }
         _ if i >= name.len() => false,
-        Element::Any { next } => naive_matches_under(pattern, name, next, i + 1, case),
+        Element::Any { next } => matches_naively(pattern, name, next, i + 1, case),
         Element::Byte { byte, next } => {
-            same_byte(byte, name[i], case) && naive_matches_under(pattern, name, next, i + 1, case)
+            literal_matches(byte, name[i], case)
+                && matches_naively(pattern, name, next, i + 1, case)
         }
-        Element::Class { hit, next } => {
-            hit && naive_matches_under(pattern, name, next, i + 1, case)
-        }
+        Element::Class { hit, next } => hit && matches_naively(pattern, name, next, i + 1, case),
     }
 }
 
@@ -618,7 +617,7 @@ fn greedy_agrees_with_exhaustive_search_under_the_case_fold() {
                     }
                     let n = &name[..nlen];
                     let fast = matches_with(p, n, FOLDED);
-                    let slow = naive_matches_under(p, n, 0, 0, Case::AsciiInsensitive);
+                    let slow = matches_naively(p, n, 0, 0, Case::AsciiInsensitive);
                     assert_eq!(fast, slow, "pattern {p:?} name {n:?}");
                     hits += u64::from(fast && p.iter().any(u8::is_ascii_alphabetic));
                 }
