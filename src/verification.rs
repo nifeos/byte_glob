@@ -14,13 +14,17 @@ const P: usize = 3;
 const N: usize = 3;
 
 /// Either leading-dot rule, chosen symbolically.
-fn any_dot() -> LeadingDot {
-    if kani::any() {
+fn any_options() -> MatchOptions {
+    let dot = if kani::any() {
         LeadingDot::Special
     } else {
         LeadingDot::Ordinary
-    }
+    };
+    MatchOptions::new().with_leading_dot(dot)
 }
+
+/// The rules with a leading `.` as an ordinary byte, so a harness is about the matcher alone.
+const ORDINARY: MatchOptions = MatchOptions::new().with_leading_dot(LeadingDot::Ordinary);
 
 /// Two symbolic lengths, within the bound above, so the empty pattern, the empty name and a
 /// pattern that ends mid-class are all reached. Symbolic length is the costliest thing here.
@@ -44,7 +48,7 @@ fn matching_is_total() {
     let pattern: [u8; P] = kani::any();
     let name: [u8; N] = kani::any();
     let (plen, nlen) = any_lengths();
-    let _ = match_steps(&pattern[..plen], &name[..nlen], any_dot());
+    let _ = match_steps(&pattern[..plen], &name[..nlen], any_options());
 }
 
 /// Falsification: replayable `falsifications/verification.the_cost_never_exceeds_the_bound.patch`
@@ -61,7 +65,7 @@ fn the_cost_never_exceeds_the_bound() {
     let name: [u8; N] = kani::any();
     let (plen, nlen) = any_lengths();
 
-    let steps = match_steps(&pattern[..plen], &name[..nlen], any_dot()).steps;
+    let steps = match_steps(&pattern[..plen], &name[..nlen], any_options()).steps;
     assert!(steps <= step_bound(plen, nlen));
 }
 
@@ -84,7 +88,7 @@ fn no_magic_means_the_pattern_is_its_own_only_match() {
     kani::assume(!has_magic(p));
     let mut buf = [0u8; P];
     let lit = literal(p, &mut buf).expect("a magic-free pattern always has a literal");
-    assert_eq!(matches_with(p, n, LeadingDot::Ordinary), n == lit);
+    assert_eq!(matches_with(p, n, ORDINARY), n == lit);
 }
 
 /// Falsification: replayable `falsifications/verification.star_matches_anything_and_question_matches_one_byte.patch`
@@ -101,12 +105,12 @@ fn star_matches_anything_and_question_matches_one_byte() {
     kani::assume(nlen <= N);
     let n = &name[..nlen];
 
-    assert!(matches_with(b"*", n, LeadingDot::Ordinary));
-    assert!(matches_with(b"**", n, LeadingDot::Ordinary));
-    assert_eq!(matches_with(b"?", n, LeadingDot::Ordinary), nlen == 1);
-    assert_eq!(matches_with(b"??", n, LeadingDot::Ordinary), nlen == 2);
+    assert!(matches_with(b"*", n, ORDINARY));
+    assert!(matches_with(b"**", n, ORDINARY));
+    assert_eq!(matches_with(b"?", n, ORDINARY), nlen == 1);
+    assert_eq!(matches_with(b"??", n, ORDINARY), nlen == 2);
     // `*` around anything still matches everything that thing matches.
-    assert_eq!(matches_with(b"*?*", n, LeadingDot::Ordinary), nlen >= 1);
+    assert_eq!(matches_with(b"*?*", n, ORDINARY), nlen >= 1);
 }
 
 /// Falsification: replayable `falsifications/verification.the_dot_rule_only_touches_names_that_start_with_a_dot.patch`
@@ -129,8 +133,8 @@ fn the_dot_rule_only_touches_names_that_start_with_a_dot() {
     let p = &pattern[..plen];
     let n = &name[..nlen];
 
-    let special = matches_with(p, n, LeadingDot::Special);
-    let ordinary = matches_with(p, n, LeadingDot::Ordinary);
+    let special = matches_with(p, n, MatchOptions::new());
+    let ordinary = matches_with(p, n, ORDINARY);
 
     if n.first() == Some(&b'.') {
         // Special is never more permissive, and is permissive only for a pattern that says `.`.
@@ -162,11 +166,11 @@ fn a_negated_class_is_the_exact_complement_of_the_class() {
     let name = [c];
 
     assert_eq!(
-        matches_with(&plain, &name, LeadingDot::Ordinary),
-        !matches_with(&negated, &name, LeadingDot::Ordinary)
+        matches_with(&plain, &name, ORDINARY),
+        !matches_with(&negated, &name, ORDINARY)
     );
     // Not vacuous: the range spelling is inside the quantifier, so this is a claim about `[a-b]`
     // as well as about `[ab]`.
     kani::cover!(body[1] == b'-');
-    kani::cover!(matches_with(&plain, &name, LeadingDot::Ordinary));
+    kani::cover!(matches_with(&plain, &name, ORDINARY));
 }

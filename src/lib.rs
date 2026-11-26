@@ -51,6 +51,54 @@ pub enum LeadingDot {
     Ordinary,
 }
 
+/// How a match reads the pattern and the name: the third argument of [`matches_with`] and
+/// [`match_steps`].
+///
+/// [`MatchOptions::new`] and [`Default`] are both exactly what [`matches()`] uses, and the
+/// `with_` methods change one rule at a time:
+///
+/// ```
+/// use byte_glob::{matches_with, LeadingDot, MatchOptions};
+///
+/// let listing = MatchOptions::new().with_leading_dot(LeadingDot::Ordinary);
+/// assert!(matches_with(b"*", b".config", listing));
+/// assert!(!matches_with(b"*", b".config", MatchOptions::default()));
+/// ```
+///
+/// `#[non_exhaustive]`, so a later version can add a rule without a new function or a breaking
+/// change. Its fields are public to read and to assign; a value is built with
+/// [`MatchOptions::new`] rather than a struct expression.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[non_exhaustive]
+pub struct MatchOptions {
+    /// Whether a leading `.` in the name needs a literal `.` in the pattern.
+    /// [`LeadingDot::Special`] unless changed.
+    pub leading_dot: LeadingDot,
+}
+
+impl MatchOptions {
+    /// The rules [`matches()`] uses: a leading `.` is special.
+    pub const fn new() -> Self {
+        MatchOptions {
+            leading_dot: LeadingDot::Special,
+        }
+    }
+
+    /// These options with the leading-dot rule replaced.
+    #[must_use]
+    pub const fn with_leading_dot(mut self, leading_dot: LeadingDot) -> Self {
+        self.leading_dot = leading_dot;
+        self
+    }
+}
+
+/// The same value as [`MatchOptions::new`], which is what [`matches()`] uses.
+impl Default for MatchOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// **Does `pattern` match `name`?** A leading `.` in the name is special; see [`LeadingDot`].
 ///
 /// `name` is one name, not a path: `/` is an ordinary byte, so `*` matches across it.
@@ -60,7 +108,7 @@ pub enum LeadingDot {
 /// # Examples
 ///
 /// ```
-/// use byte_glob::{matches, matches_with, has_magic, LeadingDot};
+/// use byte_glob::{matches, matches_with, has_magic, LeadingDot, MatchOptions};
 ///
 /// assert!(matches(b"*.txt", b"notes.txt"));
 /// assert!(!matches(b"*.txt", b"notes.md"));
@@ -71,7 +119,8 @@ pub enum LeadingDot {
 ///
 /// // One name, not a path: `/` is an ordinary byte.
 /// assert!(matches(b"*.txt", b"dir/notes.txt"));
-/// assert!(matches_with(b"*", b".hidden", LeadingDot::Ordinary));
+/// let ordinary = MatchOptions::new().with_leading_dot(LeadingDot::Ordinary);
+/// assert!(matches_with(b"*", b".hidden", ordinary));
 ///
 /// // Classes, ranges, negation.
 /// assert!(matches(b"[abc]at", b"cat"));
@@ -87,22 +136,23 @@ pub enum LeadingDot {
 /// assert!(!has_magic(br"a\*b"));
 /// ```
 pub fn matches(pattern: &[u8], name: &[u8]) -> bool {
-    match_steps(pattern, name, LeadingDot::Special).matched
+    match_steps(pattern, name, MatchOptions::new()).matched
 }
 
-/// [`matches()`], with the leading-dot rule under the caller's control.
+/// [`matches()`], with the rules under the caller's control; see [`MatchOptions`].
 ///
 /// # Examples
 ///
 /// ```
-/// use byte_glob::{matches, matches_with, LeadingDot};
+/// use byte_glob::{matches, matches_with, LeadingDot, MatchOptions};
 ///
-/// assert!(!matches(b"*", b".config"));                       // `*` does not list dotfiles
-/// assert!(matches(b".*", b".config"));                       // an explicit dot does
-/// assert!(matches_with(b"*", b".config", LeadingDot::Ordinary));    // ... unless you ask otherwise
+/// let ordinary = MatchOptions::new().with_leading_dot(LeadingDot::Ordinary);
+/// assert!(!matches(b"*", b".config")); // `*` does not list dotfiles
+/// assert!(matches(b".*", b".config")); // an explicit dot does
+/// assert!(matches_with(b"*", b".config", ordinary)); // ... unless you ask otherwise
 /// ```
-pub fn matches_with(pattern: &[u8], name: &[u8], dot: LeadingDot) -> bool {
-    match_steps(pattern, name, dot).matched
+pub fn matches_with(pattern: &[u8], name: &[u8], options: MatchOptions) -> bool {
+    match_steps(pattern, name, options).matched
 }
 
 /// **Could this pattern match anything other than one fixed name?**
@@ -168,18 +218,18 @@ pub struct Outcome {
 /// # Examples
 ///
 /// ```
-/// use byte_glob::{match_steps, step_bound, LeadingDot};
+/// use byte_glob::{match_steps, step_bound, MatchOptions};
 ///
-/// let outcome = match_steps(b"a*a*b", b"aaaa", LeadingDot::Special);
+/// let outcome = match_steps(b"a*a*b", b"aaaa", MatchOptions::new());
 /// assert!(!outcome.matched);
 /// assert!(outcome.steps <= step_bound(5, 4));
 /// ```
-pub fn match_steps(pattern: &[u8], name: &[u8], dot: LeadingDot) -> Outcome {
+pub fn match_steps(pattern: &[u8], name: &[u8], options: MatchOptions) -> Outcome {
     let mut steps = 0usize;
 
     // The leading-dot rule, applied once and up front. It is a property of the two strings' first
     // bytes, so putting it in the loop would only mean asking it repeatedly.
-    if dot == LeadingDot::Special
+    if options.leading_dot == LeadingDot::Special
         && name.first() == Some(&b'.')
         && !opens_with_a_literal_dot(pattern)
     {

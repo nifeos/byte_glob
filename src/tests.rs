@@ -3,6 +3,12 @@
 
 use super::*;
 
+/// The rules with a leading `.` as an ordinary byte, so a test is about the matcher alone.
+const ORDINARY: MatchOptions = MatchOptions::new().with_leading_dot(LeadingDot::Ordinary);
+
+/// Both leading-dot rules, for a test that holds under either.
+const BOTH_DOT_RULES: [MatchOptions; 2] = [MatchOptions::new(), ORDINARY];
+
 #[test]
 fn a_literal_pattern_matches_itself_and_nothing_else() {
     assert!(matches(b"notes.txt", b"notes.txt"));
@@ -117,9 +123,9 @@ fn a_leading_dot_is_special_by_default() {
     assert!(matches(b"a*", b"a.config"));
 
     // And the rule is switchable, because it is a policy.
-    assert!(matches_with(b"*", b".config", LeadingDot::Ordinary));
-    assert!(matches_with(b"?", b".", LeadingDot::Ordinary));
-    assert!(matches_with(b"[.]config", b".config", LeadingDot::Ordinary));
+    assert!(matches_with(b"*", b".config", ORDINARY));
+    assert!(matches_with(b"?", b".", ORDINARY));
+    assert!(matches_with(b"[.]config", b".config", ORDINARY));
 }
 
 #[test]
@@ -151,22 +157,14 @@ fn no_magic_means_the_literal_is_the_only_match() {
         let mut buf = [0u8; 32];
         let len = literal(pattern, &mut buf).expect("no magic").len();
         assert!(
-            matches_with(pattern, &buf[..len], LeadingDot::Ordinary),
+            matches_with(pattern, &buf[..len], ORDINARY),
             "{pattern:?} should match its own literal"
         );
         // And nothing else: a byte appended or removed breaks it.
         buf[len] = b'x';
-        assert!(!matches_with(
-            pattern,
-            &buf[..len + 1],
-            LeadingDot::Ordinary
-        ));
+        assert!(!matches_with(pattern, &buf[..len + 1], ORDINARY));
         if len > 0 {
-            assert!(!matches_with(
-                pattern,
-                &buf[..len - 1],
-                LeadingDot::Ordinary
-            ));
+            assert!(!matches_with(pattern, &buf[..len - 1], ORDINARY));
         }
     }
 }
@@ -247,7 +245,7 @@ fn greedy_agrees_with_exhaustive_search_over_every_short_pattern() {
                         v /= NAME.len() as u64;
                     }
                     let n = &name[..nlen];
-                    let fast = matches_with(p, n, LeadingDot::Ordinary);
+                    let fast = matches_with(p, n, ORDINARY);
                     let slow = naive_matches(p, n, 0, 0);
                     assert_eq!(fast, slow, "pattern {p:?} name {n:?}");
                     checked += 1;
@@ -307,8 +305,8 @@ fn the_worst_case_over_the_proof_domain_is_what_the_unwind_bounds_are_set_from()
                         v /= NAME.len() as u64;
                     }
                     let bucket = plen.max(nlen);
-                    for dot in [LeadingDot::Special, LeadingDot::Ordinary] {
-                        let steps = match_steps(&pattern[..plen], &name[..nlen], dot).steps;
+                    for options in BOTH_DOT_RULES {
+                        let steps = match_steps(&pattern[..plen], &name[..nlen], options).steps;
                         worst[bucket] = worst[bucket].max(steps);
                     }
                 }
@@ -338,7 +336,7 @@ fn the_pathological_pattern_stays_inside_its_bound() {
     const NAME_BYTES: usize = if cfg!(miri) { 2_000 } else { 100_000 };
     let name = [b'a'; NAME_BYTES];
     let pattern = b"a*a*a*a*a*a*a*a*a*a*b";
-    let outcome = match_steps(pattern, &name[..], LeadingDot::Ordinary);
+    let outcome = match_steps(pattern, &name[..], ORDINARY);
     let (hit, steps) = (outcome.matched, outcome.steps);
     assert!(!hit);
     assert!(
@@ -365,7 +363,7 @@ fn a_star_followed_by_a_long_tail_stays_polynomial() {
     pattern[0] = b'*';
     pattern[PATTERN_BYTES - 1] = b'b';
 
-    let outcome = match_steps(&pattern[..], &name[..], LeadingDot::Ordinary);
+    let outcome = match_steps(&pattern[..], &name[..], ORDINARY);
     let (hit, steps) = (outcome.matched, outcome.steps);
     assert!(!hit);
     assert!(steps <= step_bound(pattern.len(), NAME_BYTES));
@@ -377,7 +375,7 @@ fn a_star_followed_by_a_long_tail_stays_polynomial() {
 fn a_pattern_full_of_open_brackets_stays_inside_its_bound() {
     let pattern = [b'['; 400];
     let name = [b'['; 400];
-    let outcome = match_steps(&pattern[..], &name[..], LeadingDot::Ordinary);
+    let outcome = match_steps(&pattern[..], &name[..], ORDINARY);
     let (hit, steps) = (outcome.matched, outcome.steps);
     assert!(hit);
     assert!(steps <= step_bound(pattern.len(), name.len()));
@@ -395,8 +393,8 @@ fn the_step_bound_saturates() {
 /// above would pass on a counter that never moved.
 #[test]
 fn the_step_count_grows_with_the_work() {
-    let short = match_steps(b"*b", b"aaaa", LeadingDot::Ordinary).steps;
-    let long = match_steps(b"*b", b"aaaaaaaaaaaaaaaa", LeadingDot::Ordinary).steps;
+    let short = match_steps(b"*b", b"aaaa", ORDINARY).steps;
+    let long = match_steps(b"*b", b"aaaaaaaaaaaaaaaa", ORDINARY).steps;
     assert!(long > short);
     assert!(short > 0);
 }
@@ -415,7 +413,7 @@ fn the_step_count_grows_with_the_work() {
 /// member in front of the range separates them.
 #[test]
 fn each_class_feature_costs_its_own_scan() {
-    let steps = |p: &[u8], n: &[u8]| match_steps(p, n, LeadingDot::Special).steps;
+    let steps = |p: &[u8], n: &[u8]| match_steps(p, n, MatchOptions::new()).steps;
     assert_eq!(
         steps(b"[!b]", b"a"),
         steps(b"[b]", b"b") + 1,
@@ -497,12 +495,40 @@ fn the_public_types_hash_consistently_with_equality() {
         hasher.finish()
     }
     assert_eq!(hash_of(&LeadingDot::Special), hash_of(&LeadingDot::Special));
-    assert_ne!(
-        hash_of(&LeadingDot::Special),
-        hash_of(&LeadingDot::Ordinary)
-    );
-    let hit = match_steps(b"*.txt", b"notes.txt", LeadingDot::Special);
-    let miss = match_steps(b"*.txt", b"notes.md", LeadingDot::Special);
+    assert_ne!(hash_of(&LeadingDot::Special), hash_of(&ORDINARY));
+    let hit = match_steps(b"*.txt", b"notes.txt", MatchOptions::new());
+    let miss = match_steps(b"*.txt", b"notes.md", MatchOptions::new());
     assert_eq!(hash_of(&hit), hash_of(&hit.clone()));
     assert_ne!(hash_of(&hit), hash_of(&miss));
+}
+
+// ---- the options -------------------------------------------------------------------------
+
+/// `MatchOptions::default()` is exactly what `matches` does. A `Default` that disagreed with the
+/// plain function would stay wrong until a major release, so the two are compared on every
+/// corner of the leading-dot rule.
+#[test]
+fn the_default_options_are_what_matches_uses() {
+    assert_eq!(MatchOptions::default(), MatchOptions::new());
+    assert_eq!(MatchOptions::new().leading_dot, LeadingDot::Special);
+    for pattern in [&b"*"[..], b".*", b"[.]*", br"\.*", b"?*", b"*.txt", b""] {
+        for name in [&b".config"[..], b"notes.txt", b".", b""] {
+            assert_eq!(
+                matches(pattern, name),
+                matches_with(pattern, name, MatchOptions::default()),
+                "pattern {pattern:?} name {name:?}"
+            );
+        }
+    }
+}
+
+/// Each `with_` method changes its own field and leaves the others alone.
+#[test]
+fn a_with_method_changes_one_rule() {
+    let options = MatchOptions::new().with_leading_dot(LeadingDot::Ordinary);
+    assert_eq!(options.leading_dot, LeadingDot::Ordinary);
+    assert_eq!(
+        options.with_leading_dot(LeadingDot::Special),
+        MatchOptions::new()
+    );
 }

@@ -21,7 +21,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use byte_glob::{LeadingDot, match_steps, step_bound};
+use byte_glob::{MatchOptions, match_steps, step_bound};
 
 const RUNS: usize = 7;
 
@@ -35,7 +35,7 @@ fn nanoseconds_per_match(matches: u32, pattern: &[u8], name: &[u8]) -> f64 {
             black_box(match_steps(
                 black_box(pattern),
                 black_box(name),
-                LeadingDot::Special,
+                MatchOptions::new(),
             ));
         }
         let elapsed = start.elapsed().as_nanos() as f64 / f64::from(matches);
@@ -46,7 +46,7 @@ fn nanoseconds_per_match(matches: u32, pattern: &[u8], name: &[u8]) -> f64 {
 
 fn report(workload: &str, matches: u32, pattern: &[u8], name: &[u8]) {
     let nanoseconds = nanoseconds_per_match(matches, pattern, name);
-    let steps = match_steps(pattern, name, LeadingDot::Special).steps;
+    let steps = match_steps(pattern, name, MatchOptions::new()).steps;
     println!(
         "{workload}: {nanoseconds:.0} nanoseconds a match, {steps} steps of a bound of {}, \
          {:.1} nanoseconds a step",

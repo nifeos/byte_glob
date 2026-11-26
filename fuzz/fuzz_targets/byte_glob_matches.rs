@@ -16,7 +16,9 @@
 
 #![no_main]
 
-use byte_glob::{LeadingDot, has_magic, match_steps, matches, matches_with, step_bound};
+use byte_glob::{
+    LeadingDot, MatchOptions, has_magic, match_steps, matches, matches_with, step_bound,
+};
 use libfuzzer_sys::fuzz_target;
 
 const MAXIMUM_BYTES: usize = 64;
@@ -127,9 +129,9 @@ fn parse(pattern: &[u8]) -> Vec<Element> {
 }
 
 /// The reference matcher: a table over every pair of suffixes, filled from the end.
-fn reference_matches(pattern: &[u8], name: &[u8], dot: LeadingDot) -> bool {
+fn reference_matches(pattern: &[u8], name: &[u8], options: MatchOptions) -> bool {
     let elements = parse(pattern);
-    if dot == LeadingDot::Special
+    if options.leading_dot == LeadingDot::Special
         && name.first() == Some(&b'.')
         && !matches!(elements.first(), Some(Element::Byte(b'.')))
     {
@@ -168,15 +170,16 @@ fuzz_target!(|data: &[u8]| {
     let pattern = &pattern[..pattern.len().min(MAXIMUM_BYTES)];
     let name = &name[..name.len().min(MAXIMUM_BYTES)];
 
-    for dot in [LeadingDot::Special, LeadingDot::Ordinary] {
-        let outcome = match_steps(pattern, name, dot);
+    let ordinary = MatchOptions::new().with_leading_dot(LeadingDot::Ordinary);
+    for options in [MatchOptions::new(), ordinary] {
+        let outcome = match_steps(pattern, name, options);
         assert!(outcome.steps <= step_bound(pattern.len(), name.len()));
-        assert_eq!(outcome.matched, matches_with(pattern, name, dot));
-        assert_eq!(outcome.matched, reference_matches(pattern, name, dot));
+        assert_eq!(outcome.matched, matches_with(pattern, name, options));
+        assert_eq!(outcome.matched, reference_matches(pattern, name, options));
     }
     assert_eq!(
         matches(pattern, name),
-        matches_with(pattern, name, LeadingDot::Special)
+        matches_with(pattern, name, MatchOptions::default())
     );
 
     // The reference parse names the fixed string a magic-free pattern stands for: all its elements
@@ -190,9 +193,9 @@ fuzz_target!(|data: &[u8]| {
         .collect();
     assert_eq!(has_magic(pattern), fixed.is_none());
     if let Some(named) = fixed {
-        assert!(matches_with(pattern, &named, LeadingDot::Ordinary));
+        assert!(matches_with(pattern, &named, ordinary));
         assert_eq!(
-            matches_with(pattern, name, LeadingDot::Ordinary),
+            matches_with(pattern, name, ordinary),
             name == named.as_slice()
         );
     }
