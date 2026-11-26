@@ -93,7 +93,8 @@ about `n * n / 2` byte reads.
 `cargo bench` runs the three shapes that make a backtracking matcher blow up (ten stars and no
 match across 4,096 bytes, a star before a 63-byte tail, 256 unterminated brackets) and one
 ordinary pattern. For each it prints the time a match takes, its step count beside `step_bound`,
-and the time a step takes, so a step that got slower shows where the count cannot. The times
+and the time a step takes, so a step that got slower shows where the count cannot, then the time
+the same match takes through a `Pattern` prepared beforehand. The times
 belong to the machine that runs it, so this README states none.
 
 ## Corners
