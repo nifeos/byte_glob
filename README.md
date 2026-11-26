@@ -30,8 +30,8 @@ candidate, which is more authority than listing a directory) and no POSIX (Porta
 
 - `matches(pattern, name)` and `matches_with(pattern, name, dot)`: does the pattern match the name.
   `LeadingDot::Special` is the default; `LeadingDot::Ordinary` treats a leading `.` as any other byte.
-- `has_magic(pattern)` and `literal(pattern, out)`: is the word a pattern at all, and if not, what
-  name is it with the escapes stripped. `literal` returns `None` rather than truncate.
+- `has_magic(pattern)`: is the word a pattern at all. False means the pattern names exactly one
+  file.
 - `match_steps(pattern, name, dot)` and `step_bound(pattern_bytes, name_bytes)`: the cost of a
   match, and the most it can be, computed from the two lengths alone. `match_steps` returns an
   `Outcome` whose `matched` is the answer and whose `steps` is at most `step_bound`; the exact
@@ -43,7 +43,7 @@ complement, `\x` the byte `x`, anything else itself.
 ## EXAMPLES
 
 ```rust
-use byte_glob::{matches, matches_with, has_magic, literal, LeadingDot};
+use byte_glob::{matches, matches_with, has_magic, LeadingDot};
 
 assert!(matches(b"*.txt", b"notes.txt"));
 assert!(!matches(b"*", b".hidden"));
@@ -51,8 +51,7 @@ assert!(matches_with(b"*", b".hidden", LeadingDot::Ordinary));
 assert!(matches(b"*.txt", b"dir/notes.txt")); // one name: `/` is a byte
 
 assert!(has_magic(b"*.txt"));
-let mut buf = [0u8; 16];
-assert_eq!(literal(br"a\*b", &mut buf), Some(&b"a*b"[..]));
+assert!(!has_magic(br"a\*b"));
 ```
 
 ## What is proven
@@ -72,8 +71,8 @@ The matcher keeps exactly one backtrack point, the most recent `*`, which is the
 `fnmatch` implementations use to avoid the exponential split a recursive matcher tries. A retry
 position advances monotonically, so a match makes at most `name_bytes + 1` backtracks, and between
 two of them the name position plus the pattern position strictly increases. The work is polynomial
-in the two lengths with no term in the number of `*`s. `has_magic` and `literal` are not counted by
-`match_steps`: each decodes a `[` by scanning to its closing `]`, so `n` unterminated brackets cost
+in the two lengths with no term in the number of `*`s. `has_magic` is not counted by
+`match_steps`: it decodes a `[` by scanning to its closing `]`, so `n` unterminated brackets cost
 about `n * n / 2` byte reads.
 
 `cargo bench` runs the three shapes that make a backtracking matcher blow up (ten stars and no

@@ -7,8 +7,8 @@
 //! - nothing panics, and the step count is at most `step_bound` of the two lengths;
 //! - `match_steps`, `matches_with` and (under the default rule) `matches` agree with each other
 //!   and with the reference;
-//! - a pattern with no magic has a literal, matches exactly that literal under
-//!   `LeadingDot::Ordinary`, and a pattern with magic has none.
+//! - a pattern with no magic names one fixed byte string (read from the reference's parse),
+//!   matches exactly that string under `LeadingDot::Ordinary`, and a pattern with magic does not.
 //!
 //! The reference parses the pattern into a list of elements once and then fills a table of
 //! "does pattern suffix `j` match name suffix `i`". It shares no code with the crate: an
@@ -16,7 +16,7 @@
 
 #![no_main]
 
-use byte_glob::{LeadingDot, has_magic, literal, match_steps, matches, matches_with, step_bound};
+use byte_glob::{LeadingDot, has_magic, match_steps, matches, matches_with, step_bound};
 use libfuzzer_sys::fuzz_target;
 
 const MAXIMUM_BYTES: usize = 64;
@@ -179,16 +179,21 @@ fuzz_target!(|data: &[u8]| {
         matches_with(pattern, name, LeadingDot::Special)
     );
 
-    let mut buffer = [0u8; MAXIMUM_BYTES];
-    let named = literal(pattern, &mut buffer);
-    if has_magic(pattern) {
-        assert_eq!(named, None);
-    } else {
-        let named = named.expect("a pattern with no magic has a literal");
-        assert!(matches_with(pattern, named, LeadingDot::Ordinary));
+    // The reference parse names the fixed string a magic-free pattern stands for: all its elements
+    // are plain bytes. `has_magic` must agree about which patterns those are.
+    let fixed: Option<Vec<u8>> = parse(pattern)
+        .iter()
+        .map(|element| match element {
+            Element::Byte(byte) => Some(*byte),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(has_magic(pattern), fixed.is_none());
+    if let Some(named) = fixed {
+        assert!(matches_with(pattern, &named, LeadingDot::Ordinary));
         assert_eq!(
             matches_with(pattern, name, LeadingDot::Ordinary),
-            name == named
+            name == named.as_slice()
         );
     }
 });

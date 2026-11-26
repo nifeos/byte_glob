@@ -123,7 +123,7 @@ fn a_leading_dot_is_special_by_default() {
 }
 
 #[test]
-fn magic_and_the_literal_behind_it() {
+fn what_has_magic() {
     assert!(has_magic(b"*.txt"));
     assert!(has_magic(b"a?b"));
     assert!(has_magic(b"[ab]"));
@@ -131,19 +131,6 @@ fn magic_and_the_literal_behind_it() {
     assert!(!has_magic(br"a\*b"));
     assert!(!has_magic(b"[foo")); // never closes, so it is a literal `[foo`
     assert!(!has_magic(b""));
-
-    let mut buf = [0u8; 32];
-    assert_eq!(literal(b"notes.txt", &mut buf), Some(&b"notes.txt"[..]));
-    assert_eq!(literal(br"a\*b", &mut buf), Some(&b"a*b"[..]));
-    assert_eq!(literal(b"[foo", &mut buf), Some(&b"[foo"[..]));
-    assert_eq!(literal(b"", &mut buf), Some(&b""[..]));
-    assert_eq!(literal(b"*.txt", &mut buf), None);
-
-    // Too small an output buffer is `None`, not a panic and not a truncation: a truncated
-    // filename is a different file, and this is the path that decides what gets granted.
-    let mut tiny = [0u8; 3];
-    assert_eq!(literal(b"abcd", &mut tiny), None);
-    assert_eq!(literal(b"abc", &mut tiny), Some(&b"abc"[..]));
 }
 
 /// A magic-free pattern matches its own literal and nothing else, which is what lets the shell
