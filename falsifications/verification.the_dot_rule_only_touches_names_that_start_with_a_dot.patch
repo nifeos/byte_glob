@@ -8,10 +8,10 @@ Expected to fail: the harness's `assert_eq!(special, ordinary)` for a name that 
 diff --git a/src/lib.rs b/src/lib.rs
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -300,7 +300,6 @@ pub fn match_steps(pattern: &[u8], name: &[u8], options: MatchOptions) -> Outcom
+@@ -313,7 +313,6 @@ fn match_steps_under(pattern: &[u8], name: &[u8], leading_dot: LeadingDot, case:
      // The leading-dot rule, applied once and up front. It is a property of the two strings' first
      // bytes, so putting it in the loop would only mean asking it repeatedly.
-     if options.leading_dot == LeadingDot::Special
+     if leading_dot == LeadingDot::Special
 -        && name.first() == Some(&b'.')
          && !opens_with_a_literal_dot(pattern)
      {
