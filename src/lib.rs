@@ -13,8 +13,8 @@
 //!
 //! A malformed pattern means itself, and there is no `**`, qualifier or POSIX class.
 //! The work of [`match_steps`] is bounded by [`step_bound`]. [`has_magic`]
-//! and [`literal`] are not counted: each decodes a `[` by scanning to its closing `]` or the end,
-//! so a pattern of `n` unterminated brackets costs about `n * n / 2` byte reads in either, which is
+//! is not counted: it decodes a `[` by scanning to its closing `]` or the end,
+//! so a pattern of `n` unterminated brackets costs about `n * n / 2` byte reads, which is
 //! small at the lengths of a shell word.
 //!
 //! # Syntax
@@ -55,7 +55,7 @@ pub enum LeadingDot {
 /// # Examples
 ///
 /// ```
-/// use byte_glob::{matches, matches_with, has_magic, literal, LeadingDot};
+/// use byte_glob::{matches, matches_with, has_magic, LeadingDot};
 ///
 /// assert!(matches(b"*.txt", b"notes.txt"));
 /// assert!(!matches(b"*.txt", b"notes.md"));
@@ -77,12 +77,9 @@ pub enum LeadingDot {
 /// // A malformed pattern is a literal, not an error.
 /// assert!(matches(b"[foo", b"[foo"));
 ///
-/// // The shell asks two questions of a word: is it a pattern at all, and if not, what name is it?
+/// // The shell asks of a word: is it a pattern at all?
 /// assert!(has_magic(b"*.txt"));
 /// assert!(!has_magic(br"a\*b"));
-/// let mut buf = [0u8; 16];
-/// assert_eq!(literal(br"a\*b", &mut buf), Some(&b"a*b"[..]));
-/// assert_eq!(literal(b"*.txt", &mut buf), None); // it has magic; expand it instead
 /// ```
 pub fn matches(pattern: &[u8], name: &[u8]) -> bool {
     match_steps(pattern, name, LeadingDot::Special).matched
@@ -106,7 +103,7 @@ pub fn matches_with(pattern: &[u8], name: &[u8], dot: LeadingDot) -> bool {
 /// **Could this pattern match anything other than one fixed name?**
 ///
 /// True when the pattern contains an unescaped `*` or `?`, or a bracket expression that is actually
-/// closed. False means the pattern is a literal, and [`literal`] will give you the name it is.
+/// closed. False means the pattern is a literal: it names exactly one file, with its escapes stripped.
 ///
 /// Precise rather than eager, so an unterminated `[` is a literal byte: a false "yes" costs the
 /// shell a directory enumeration for a word that names one file.
@@ -121,12 +118,12 @@ pub fn has_magic(pattern: &[u8]) -> bool {
     false
 }
 
-/// **The one name a magic-free pattern names**, with its escapes stripped, written into `out`.
+/// The one name a magic-free pattern names, with its escapes stripped, written into `out`.
 ///
-/// `Some(name)` when the pattern has no magic and `out` was long enough; `None` when it has magic
-/// (call the expander instead) or would not fit. `a\*b` is the file called `a*b`; this exists so
-/// no caller reimplements escape-stripping.
-pub fn literal<'a>(pattern: &[u8], out: &'a mut [u8]) -> Option<&'a [u8]> {
+/// `None` when the pattern has magic or the name does not fit. The tests and proofs use it to state
+/// that a pattern with no magic matches exactly this name; the crate itself has no caller.
+#[cfg(any(test, kani))]
+fn literal<'a>(pattern: &[u8], out: &'a mut [u8]) -> Option<&'a [u8]> {
     let mut j = 0;
     let mut n = 0;
     while let Some((elem, _)) = decode(pattern, j, 0) {
