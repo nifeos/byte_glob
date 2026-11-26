@@ -9,6 +9,9 @@ const ORDINARY: MatchOptions = MatchOptions::new().with_leading_dot(LeadingDot::
 /// Both leading-dot rules, for a test that holds under either.
 const BOTH_DOT_RULES: [MatchOptions; 2] = [MatchOptions::new(), ORDINARY];
 
+/// [`ORDINARY`] with ASCII letters matching either case.
+const FOLDED: MatchOptions = ORDINARY.with_case(Case::AsciiInsensitive);
+
 #[test]
 fn a_literal_pattern_matches_itself_and_nothing_else() {
     assert!(matches(b"notes.txt", b"notes.txt"));
@@ -178,17 +181,22 @@ fn no_magic_means_the_literal_is_the_only_match() {
 /// cross-check below compares is therefore the **search strategy** and nothing else: if the two
 /// disagree, the greedy single-backtrack loop is wrong, not the syntax.
 fn naive_matches(pattern: &[u8], name: &[u8], j: usize, i: usize) -> bool {
+    naive_matches_under(pattern, name, j, i, Case::Sensitive)
+}
+
+/// [`naive_matches`] under a case rule.
+fn naive_matches_under(pattern: &[u8], name: &[u8], j: usize, i: usize, case: Case) -> bool {
     // Past the end of the name the byte does not matter: every arm that could read it returns
     // false first.
     let c = name.get(i).copied().unwrap_or(0);
-    let Some((elem, _)) = decode(pattern, j, c) else {
+    let Some((elem, _)) = decode(pattern, j, c, case) else {
         return i == name.len();
     };
     match elem {
         Element::Star => {
             let mut absorbed = i;
             loop {
-                if naive_matches(pattern, name, j + 1, absorbed) {
+                if naive_matches_under(pattern, name, j + 1, absorbed, case) {
                     return true;
                 }
                 if absorbed == name.len() {
@@ -198,11 +206,13 @@ fn naive_matches(pattern: &[u8], name: &[u8], j: usize, i: usize) -> bool {
             }
         }
         _ if i >= name.len() => false,
-        Element::Any { next } => naive_matches(pattern, name, next, i + 1),
+        Element::Any { next } => naive_matches_under(pattern, name, next, i + 1, case),
         Element::Byte { byte, next } => {
-            byte == name[i] && naive_matches(pattern, name, next, i + 1)
+            same_byte(byte, name[i], case) && naive_matches_under(pattern, name, next, i + 1, case)
         }
-        Element::Class { hit, next } => hit && naive_matches(pattern, name, next, i + 1),
+        Element::Class { hit, next } => {
+            hit && naive_matches_under(pattern, name, next, i + 1, case)
+        }
     }
 }
 
@@ -531,4 +541,90 @@ fn a_with_method_changes_one_rule() {
         options.with_leading_dot(LeadingDot::Special),
         MatchOptions::new()
     );
+}
+
+// ---- the case fold -----------------------------------------------------------------------
+
+#[test]
+fn the_case_fold_matches_either_case_of_an_ascii_letter() {
+    let folded = MatchOptions::new().with_case(Case::AsciiInsensitive);
+    // A literal, in both directions.
+    assert!(matches_with(b"*.txt", b"NOTES.TXT", folded));
+    assert!(matches_with(b"*.TXT", b"notes.txt", folded));
+    assert!(matches_with(br"\N*", b"notes", folded));
+    assert!(!matches(b"*.txt", b"NOTES.TXT"));
+    // A set, a range and a negation.
+    assert!(matches_with(b"[abc]", b"B", folded));
+    assert!(matches_with(b"[A-C]", b"b", folded));
+    assert!(!matches_with(b"[a-c]", b"D", folded));
+    assert!(!matches_with(b"[!a]", b"A", folded));
+    assert!(!matches_with(b"[!A]", b"a", folded));
+    assert!(matches_with(b"[!a]", b"b", folded));
+    // Only ASCII letters fold: the bytes beside them in the table, and non-ASCII bytes, do not.
+    assert!(!matches_with(b"@", b"`", folded));
+    assert!(!matches_with(b"[", b"{", folded));
+    assert!(!matches_with(
+        "\u{e9}".as_bytes(),
+        "\u{c9}".as_bytes(),
+        folded
+    ));
+    // The dot rule is untouched.
+    assert!(!matches_with(b"*", b".Config", folded));
+    assert!(matches_with(b".c*", b".Config", folded));
+}
+
+/// The fold charges a step for what it charges without one, so the bound holds unchanged on the
+/// shapes that make a matcher work hardest.
+#[test]
+fn the_case_fold_stays_under_the_bound() {
+    let long = [b'A'; 4096];
+    for (pattern, name) in [
+        (&b"a*a*a*a*a*a*a*a*a*a*b"[..], &long[..]),
+        (b"[a-c]*[!x]", b"BxxxxQ"),
+        (b"*.txt", b"NOTES.TXT"),
+    ] {
+        let folded = match_steps(pattern, name, FOLDED);
+        assert!(folded.steps <= step_bound(pattern.len(), name.len()));
+    }
+}
+
+/// **The greedy matcher agrees with exhaustive search under the case fold**, over every pattern
+/// of length 0..=4 over `a`, `B`, `*`, `?`, `[`, `]`, `!`, `-` against every name of length
+/// 0..=3 over `A`, `b`, `-`. The alphabets put each letter in the other case on the two sides,
+/// so every hit on a letter is a hit through the fold.
+#[test]
+fn greedy_agrees_with_exhaustive_search_under_the_case_fold() {
+    const PAT: &[u8] = b"aB*?[]!-";
+    const NAME: &[u8] = b"Ab-";
+
+    let mut pattern = [0u8; 4];
+    let mut name = [0u8; 3];
+    let mut hits = 0u64;
+    let stride: usize = if cfg!(miri) { 61 } else { 1 };
+    for plen in 0..=4usize {
+        for pc in (0..PAT.len().pow(plen as u32)).step_by(stride) {
+            let mut v = pc;
+            for slot in pattern.iter_mut().take(plen) {
+                *slot = PAT[v % PAT.len()];
+                v /= PAT.len();
+            }
+            let p = &pattern[..plen];
+            for nlen in 0..=3usize {
+                for nc in 0..NAME.len().pow(nlen as u32) {
+                    let mut v = nc;
+                    for slot in name.iter_mut().take(nlen) {
+                        *slot = NAME[v % NAME.len()];
+                        v /= NAME.len();
+                    }
+                    let n = &name[..nlen];
+                    let fast = matches_with(p, n, FOLDED);
+                    let slow = naive_matches_under(p, n, 0, 0, Case::AsciiInsensitive);
+                    assert_eq!(fast, slow, "pattern {p:?} name {n:?}");
+                    hits += u64::from(fast && p.iter().any(u8::is_ascii_alphabetic));
+                }
+            }
+        }
+    }
+    // Not vacuous: some patterns with a letter in them matched, which only the fold allows.
+    assert!(hits > 0, "{hits} matches through the fold");
 }

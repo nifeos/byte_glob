@@ -51,6 +51,24 @@ pub enum LeadingDot {
     Ordinary,
 }
 
+/// Whether a letter in the pattern matches the other case of itself in the name.
+///
+/// `#[non_exhaustive]`, so a later version can add a rule without breaking a `match` on it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[non_exhaustive]
+pub enum Case {
+    /// A byte matches only itself: `*.txt` does not match `NOTES.TXT`. What [`matches()`] uses,
+    /// and what `fnmatch(3)` does without `FNM_CASEFOLD`.
+    Sensitive,
+    /// An ASCII letter in the name matches either case of itself in the pattern, in a literal and
+    /// in a bracket expression: `*.txt` matches `NOTES.TXT`, and `[a-c]` matches `B`. A bracket
+    /// expression asks whether the name's byte or its other case is a member, and a negated one
+    /// complements that answer, so `[!a]` matches neither `a` nor `A`. Every other byte, each byte
+    /// of a multibyte UTF-8 character included, matches only itself. `fnmatch(3)`'s
+    /// `FNM_CASEFOLD` in the C locale, for a caller such as a reader of a volume that folds case.
+    AsciiInsensitive,
+}
+
 /// How a match reads the pattern and the name: the third argument of [`matches_with`] and
 /// [`match_steps`].
 ///
@@ -74,13 +92,16 @@ pub struct MatchOptions {
     /// Whether a leading `.` in the name needs a literal `.` in the pattern.
     /// [`LeadingDot::Special`] unless changed.
     pub leading_dot: LeadingDot,
+    /// Whether an ASCII letter matches its other case. [`Case::Sensitive`] unless changed.
+    pub case: Case,
 }
 
 impl MatchOptions {
-    /// The rules [`matches()`] uses: a leading `.` is special.
+    /// The rules [`matches()`] uses: a leading `.` is special, and case is significant.
     pub const fn new() -> Self {
         MatchOptions {
             leading_dot: LeadingDot::Special,
+            case: Case::Sensitive,
         }
     }
 
@@ -88,6 +109,21 @@ impl MatchOptions {
     #[must_use]
     pub const fn with_leading_dot(mut self, leading_dot: LeadingDot) -> Self {
         self.leading_dot = leading_dot;
+        self
+    }
+
+    /// These options with the case rule replaced.
+    ///
+    /// ```
+    /// use byte_glob::{matches, matches_with, Case, MatchOptions};
+    ///
+    /// let folded = MatchOptions::new().with_case(Case::AsciiInsensitive);
+    /// assert!(!matches(b"*.txt", b"NOTES.TXT"));
+    /// assert!(matches_with(b"*.txt", b"NOTES.TXT", folded));
+    /// ```
+    #[must_use]
+    pub const fn with_case(mut self, case: Case) -> Self {
+        self.case = case;
         self
     }
 }
@@ -164,7 +200,7 @@ pub fn matches_with(pattern: &[u8], name: &[u8], options: MatchOptions) -> bool 
 /// shell a directory enumeration for a word that names one file.
 pub fn has_magic(pattern: &[u8]) -> bool {
     let mut j = 0;
-    while let Some((elem, _)) = decode(pattern, j, 0) {
+    while let Some((elem, _)) = decode(pattern, j, 0, Case::Sensitive) {
         match elem {
             Element::Byte { next, .. } => j = next,
             _ => return true,
@@ -181,7 +217,7 @@ pub fn has_magic(pattern: &[u8]) -> bool {
 fn literal<'a>(pattern: &[u8], out: &'a mut [u8]) -> Option<&'a [u8]> {
     let mut j = 0;
     let mut n = 0;
-    while let Some((elem, _)) = decode(pattern, j, 0) {
+    while let Some((elem, _)) = decode(pattern, j, 0, Case::Sensitive) {
         match elem {
             Element::Byte { byte, next } => {
                 *out.get_mut(n)? = byte;
@@ -264,7 +300,7 @@ pub fn match_steps(pattern: &[u8], name: &[u8], options: MatchOptions) -> Outcom
             };
         }
 
-        let advanced = match decode(pattern, j, name[i]) {
+        let advanced = match decode(pattern, j, name[i], options.case) {
             // Pattern exhausted with name left over. Not a match here; the backtrack below decides
             // whether an earlier `*` can swallow the remainder.
             None => false,
@@ -283,7 +319,7 @@ pub fn match_steps(pattern: &[u8], name: &[u8], options: MatchOptions) -> Outcom
                         true
                     }
                     Element::Byte { byte, next } => {
-                        if byte == name[i] {
+                        if same_byte(byte, name[i], options.case) {
                             i += 1;
                             j = next;
                             true
@@ -353,7 +389,7 @@ pub const fn step_bound(pattern_bytes: usize, name_bytes: usize) -> usize {
 /// Kani could unroll.
 ///
 /// Callers with no name byte in hand ([`has_magic`], [`literal`], [`opens_with_a_literal_dot`]) pass
-/// any byte and read only the variant.
+/// any byte and any case rule, and read only the variant.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Element {
     /// `*`
@@ -366,13 +402,13 @@ enum Element {
     Class { hit: bool, next: usize },
 }
 
-/// Decode the element at `j` as applied to the name byte `c`, and say how many pattern bytes that
-/// cost.
+/// Decode the element at `j` as applied to the name byte `c` under the case rule `case`, and say
+/// how many pattern bytes that cost.
 ///
 /// `None` at the end of the pattern. Every other input decodes to something: this is where "there
 /// is no malformed pattern" is implemented, by turning an unclosed `[` and a trailing `\` into the
 /// bytes they are.
-fn decode(pattern: &[u8], j: usize, c: u8) -> Option<(Element, usize)> {
+fn decode(pattern: &[u8], j: usize, c: u8, case: Case) -> Option<(Element, usize)> {
     let byte = *pattern.get(j)?;
     let elem = match byte {
         b'*' => (Element::Star, 1),
@@ -395,7 +431,7 @@ fn decode(pattern: &[u8], j: usize, c: u8) -> Option<(Element, usize)> {
             ),
         },
         b'[' => {
-            let (closed, scanned) = class_at(pattern, j, c);
+            let (closed, scanned) = class_at(pattern, j, c, case);
             match closed {
                 Some((hit, next)) => (Element::Class { hit, next }, scanned),
                 // No closing bracket anywhere, so it was never a bracket expression. The scan that
@@ -422,7 +458,13 @@ fn decode(pattern: &[u8], j: usize, c: u8) -> Option<(Element, usize)> {
 /// literal byte. `scanned` is charged either way. A `!` or `^` right after `[` negates; a `]` right
 /// after that is a member; a `-` is a range only before a byte that is not the terminator, so
 /// `[a-]` and `[-a]` both mean "a hyphen or an a".
-fn class_at(pattern: &[u8], open: usize, c: u8) -> (Option<(bool, usize)>, usize) {
+fn class_at(pattern: &[u8], open: usize, c: u8, case: Case) -> (Option<(bool, usize)>, usize) {
+    // Under a fold, the name's byte is a member when either case of it is. `other` is `c` itself
+    // for a byte that is not an ASCII letter, and under `Case::Sensitive`.
+    let other = match case {
+        Case::AsciiInsensitive => other_case(c),
+        Case::Sensitive => c,
+    };
     let mut k = open + 1;
     let negated = matches!(pattern.get(k), Some(b'!') | Some(b'^'));
     let mut scanned = 1usize;
@@ -466,16 +508,33 @@ fn class_at(pattern: &[u8], open: usize, c: u8) -> (Option<(bool, usize)>, usize
             scanned += after_hi - after_lo;
             // A reversed range (`[z-a]`) is empty. POSIX calls it undefined; glibc makes it match
             // nothing, which is the answer that cannot surprise anyone into a larger grant.
-            if lo <= c && c <= hi {
+            if (lo <= c && c <= hi) || (lo <= other && other <= hi) {
                 hit = true;
             }
             k = after_hi;
         } else {
-            if lo == c {
+            if lo == c || lo == other {
                 hit = true;
             }
             k = after_lo;
         }
+    }
+}
+
+/// Does a literal byte of the pattern match this byte of the name, under this case rule?
+fn same_byte(literal: u8, c: u8, case: Case) -> bool {
+    match case {
+        Case::Sensitive => literal == c,
+        Case::AsciiInsensitive => literal.eq_ignore_ascii_case(&c),
+    }
+}
+
+/// The other case of an ASCII letter, and any other byte unchanged.
+const fn other_case(c: u8) -> u8 {
+    if c.is_ascii_lowercase() {
+        c.to_ascii_uppercase()
+    } else {
+        c.to_ascii_lowercase()
     }
 }
 
@@ -486,7 +545,7 @@ fn class_at(pattern: &[u8], open: usize, c: u8) -> (Option<(bool, usize)>, usize
 /// dotfile, and a class is a wildcard however few members it has.
 fn opens_with_a_literal_dot(pattern: &[u8]) -> bool {
     matches!(
-        decode(pattern, 0, 0),
+        decode(pattern, 0, 0, Case::Sensitive),
         Some((Element::Byte { byte: b'.', .. }, _))
     )
 }

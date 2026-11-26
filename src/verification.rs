@@ -13,14 +13,19 @@ use super::*;
 const P: usize = 3;
 const N: usize = 3;
 
-/// Either leading-dot rule, chosen symbolically.
+/// Either leading-dot rule and either case rule, chosen symbolically.
 fn any_options() -> MatchOptions {
     let dot = if kani::any() {
         LeadingDot::Special
     } else {
         LeadingDot::Ordinary
     };
-    MatchOptions::new().with_leading_dot(dot)
+    let case = if kani::any() {
+        Case::Sensitive
+    } else {
+        Case::AsciiInsensitive
+    };
+    MatchOptions::new().with_leading_dot(dot).with_case(case)
 }
 
 /// The rules with a leading `.` as an ordinary byte, so a harness is about the matcher alone.
@@ -39,7 +44,7 @@ fn any_lengths() -> (usize, usize) {
 /// Falsification: replayable `falsifications/verification.matching_is_total.patch`
 /// **Matching is total.**
 ///
-/// For every pattern and name of up to three arbitrary bytes, under both [`LeadingDot`] settings: no
+/// For every pattern and name of up to three arbitrary bytes, under every [`MatchOptions`]: no
 /// panic, overflow or out-of-bounds index, and the loop terminates within the unwinding bound,
 /// which is the property that matters for an untrusted pattern.
 #[kani::proof]
@@ -173,4 +178,28 @@ fn a_negated_class_is_the_exact_complement_of_the_class() {
     // as well as about `[ab]`.
     kani::cover!(body[1] == b'-');
     kani::cover!(matches_with(&plain, &name, ORDINARY));
+}
+
+/// Falsification: replayable `falsifications/verification.the_case_fold_ignores_the_case_of_the_name.patch`
+/// **Under the case fold, the case of the name's letters changes no answer**, over every pattern
+/// and name of up to three arbitrary bytes: a name and the same name with every ASCII letter
+/// lowercased match the same patterns, in literals, sets, ranges and negations alike.
+#[kani::proof]
+#[kani::unwind(11)]
+fn the_case_fold_ignores_the_case_of_the_name() {
+    let pattern: [u8; P] = kani::any();
+    let name: [u8; N] = kani::any();
+    let (plen, nlen) = any_lengths();
+    let p = &pattern[..plen];
+    let n = &name[..nlen];
+    let mut lower = name;
+    lower.make_ascii_lowercase();
+    let folded = ORDINARY.with_case(Case::AsciiInsensitive);
+
+    assert_eq!(
+        matches_with(p, n, folded),
+        matches_with(p, &lower[..nlen], folded)
+    );
+    // Not vacuous: an uppercase letter in the name reaches a pattern that matches it.
+    kani::cover!(n.first().is_some_and(u8::is_ascii_uppercase) && matches_with(p, n, folded));
 }
