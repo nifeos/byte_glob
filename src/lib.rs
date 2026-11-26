@@ -35,7 +35,7 @@
 ///
 /// This is `fnmatch(3)`'s `FNM_PERIOD` as a two-valued type rather than a flag bit, because there
 /// are exactly two answers and the compiler should be able to say which one a call site chose.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum LeadingDot {
     /// A name starting with `.` matches only a pattern starting with a **literal** `.` (which `\.`
     /// counts as, and `[.]` does not). What [`matches()`] uses, and what a shell user expects: `*`
@@ -143,7 +143,7 @@ fn literal<'a>(pattern: &[u8], out: &'a mut [u8]) -> Option<&'a [u8]> {
 ///
 /// `#[non_exhaustive]`, so a later version can report more about a match without breaking a
 /// caller that reads these two fields.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[non_exhaustive]
 pub struct Outcome {
     /// Whether the pattern matched the name: what [`matches_with`] returns for the same arguments.

@@ -471,3 +471,38 @@ fn a_range_admits_neither_its_hyphen_nor_a_reversed_endpoint() {
     assert!(!matches(b"[z-a]", b"a"));
     assert!(!matches(b"[z-a]", b"z"));
 }
+
+// ---- the common traits -------------------------------------------------------------------
+
+/// The public types hash, so a caller can key a cache by policy or by result. Compiled here
+/// rather than only promised: a removed derive fails this build, and equal values hash equally.
+#[test]
+fn the_public_types_hash_consistently_with_equality() {
+    use core::hash::{Hash, Hasher};
+    /// Fowler-Noll-Vo, 64-bit: a hasher small enough to write here, since the crate has no `std`.
+    struct Fnv(u64);
+    impl Hasher for Fnv {
+        fn finish(&self) -> u64 {
+            self.0
+        }
+        fn write(&mut self, bytes: &[u8]) {
+            for &byte in bytes {
+                self.0 = (self.0 ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+    }
+    fn hash_of<T: Hash>(value: &T) -> u64 {
+        let mut hasher = Fnv(0xcbf2_9ce4_8422_2325);
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+    assert_eq!(hash_of(&LeadingDot::Special), hash_of(&LeadingDot::Special));
+    assert_ne!(
+        hash_of(&LeadingDot::Special),
+        hash_of(&LeadingDot::Ordinary)
+    );
+    let hit = match_steps(b"*.txt", b"notes.txt", LeadingDot::Special);
+    let miss = match_steps(b"*.txt", b"notes.md", LeadingDot::Special);
+    assert_eq!(hash_of(&hit), hash_of(&hit.clone()));
+    assert_ne!(hash_of(&hit), hash_of(&miss));
+}
