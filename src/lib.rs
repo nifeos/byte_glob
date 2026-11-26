@@ -33,9 +33,14 @@
 
 /// Whether a leading `.` in the name is special.
 ///
-/// This is `fnmatch(3)`'s `FNM_PERIOD` as a two-valued type rather than a flag bit, because there
-/// are exactly two answers and the compiler should be able to say which one a call site chose.
+/// This is `fnmatch(3)`'s `FNM_PERIOD` as a named type rather than a flag bit, so the compiler can
+/// say which rule a call site chose.
+///
+/// `#[non_exhaustive]`: there are two rules today, and a later version may add a third, such as
+/// a dot that is special only after a `/` for a caller matching paths. A `match` on it outside
+/// this crate carries a wildcard arm.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[non_exhaustive]
 pub enum LeadingDot {
     /// A name starting with `.` matches only a pattern starting with a **literal** `.` (which `\.`
     /// counts as, and `[.]` does not). What [`matches()`] uses, and what a shell user expects: `*`
