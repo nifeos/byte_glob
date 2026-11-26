@@ -628,3 +628,90 @@ fn greedy_agrees_with_exhaustive_search_under_the_case_fold() {
     // Not vacuous: some patterns with a letter in them matched, which only the fold allows.
     assert!(hits > 0, "{hits} matches through the fold");
 }
+
+// ---- the prepared pattern ----------------------------------------------------------------
+
+/// **A prepared pattern agrees with the plain functions**, under both leading-dot rules and both
+/// case rules, over every pattern of length 0..=4 over `a`, `B`, `.`, `*`, `?`, `[`, `]`, `!`,
+/// `-`, `\` against every name of length 0..=3 over `A`, `b`, `.`, `-`. The alphabets reach a
+/// tail after the last `*` of every width, a class and an escape in it, a dotfile, and the fold.
+#[test]
+fn a_prepared_pattern_agrees_with_the_plain_functions() {
+    const PAT: &[u8] = b"aB.*?[]!-\\";
+    const NAME: &[u8] = b"Ab.-";
+
+    let every_option = [
+        MatchOptions::new(),
+        ORDINARY,
+        MatchOptions::new().with_case(Case::AsciiInsensitive),
+        FOLDED,
+    ];
+    let mut pattern = [0u8; 4];
+    let mut name = [0u8; 3];
+    let mut checked = 0u64;
+    let mut hits = 0u64;
+    let stride: usize = if cfg!(miri) { 61 } else { 1 };
+    for plen in 0..=4usize {
+        for pc in (0..PAT.len().pow(plen as u32)).step_by(stride) {
+            let mut v = pc;
+            for slot in pattern.iter_mut().take(plen) {
+                *slot = PAT[v % PAT.len()];
+                v /= PAT.len();
+            }
+            let p = &pattern[..plen];
+            let prepared = Pattern::new(p);
+            for nlen in 0..=3usize {
+                for nc in 0..NAME.len().pow(nlen as u32) {
+                    let mut v = nc;
+                    for slot in name.iter_mut().take(nlen) {
+                        *slot = NAME[v % NAME.len()];
+                        v /= NAME.len();
+                    }
+                    let n = &name[..nlen];
+                    for options in every_option {
+                        let plain = matches_with(p, n, options);
+                        assert_eq!(
+                            prepared.matches_with(n, options),
+                            plain,
+                            "pattern {p:?} name {n:?} {options:?}"
+                        );
+                        checked += 1;
+                        hits += u64::from(plain);
+                    }
+                    assert_eq!(prepared.matches(n), matches(p, n));
+                }
+            }
+        }
+    }
+    // Not vacuous: both answers occur often.
+    assert!(
+        hits > 10_000 && hits < checked - 10_000,
+        "{hits} of {checked}"
+    );
+}
+
+/// The shapes the prepared form is for, at length: the same answers as the plain functions.
+#[test]
+fn a_prepared_pattern_agrees_at_length() {
+    let mut tail = [b'?'; 65];
+    tail[0] = b'*';
+    tail[64] = b'b';
+    let mut long = [b'a'; 4096];
+    for (pattern, name_end) in [
+        (&tail[..], b'b'),
+        (&tail[..], b'a'),
+        (&b"a*a*a*a*a*a*a*a*a*a*b"[..], b'b'),
+        (b"a*a*a*a*a*a*a*a*a*a*b", b'a'),
+        (b"*[!a]", b'b'),
+    ] {
+        long[4095] = name_end;
+        assert_eq!(
+            Pattern::new(pattern).matches_with(&long, ORDINARY),
+            matches_with(pattern, &long, ORDINARY),
+            "pattern {pattern:?} ending {name_end}"
+        );
+    }
+    // And the tail shape does match a name that ends in its literal.
+    long[4095] = b'b';
+    assert!(Pattern::new(&tail).matches_with(&long, ORDINARY));
+}

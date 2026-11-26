@@ -203,3 +203,23 @@ fn the_case_fold_ignores_the_case_of_the_name() {
     // Not vacuous: an uppercase letter in the name reaches a pattern that matches it.
     kani::cover!(n.first().is_some_and(u8::is_ascii_uppercase) && matches_with(p, n, folded));
 }
+
+/// Falsification: replayable `falsifications/verification.a_prepared_pattern_agrees_with_the_plain_match.patch`
+/// **A prepared pattern gives the plain match's answer**, over every pattern and name of up to
+/// three arbitrary bytes and every [`MatchOptions`]: the tail after the last `*` lined up with the
+/// end of the name, then the head, decide exactly what the one-backtrack match decides.
+#[kani::proof]
+#[kani::unwind(11)]
+fn a_prepared_pattern_agrees_with_the_plain_match() {
+    let pattern: [u8; P] = kani::any();
+    let name: [u8; N] = kani::any();
+    let (plen, nlen) = any_lengths();
+    let p = &pattern[..plen];
+    let n = &name[..nlen];
+    let options = any_options();
+
+    assert_eq!(
+        Pattern::new(p).matches_with(n, options),
+        matches_with(p, n, options)
+    );
+}

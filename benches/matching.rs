@@ -6,7 +6,7 @@
 //! the one the rest of the machine disturbed least. `black_box` keeps the compiler from folding
 //! the work away. Each line also prints the step count of one match and the `step_bound` for the
 //! two lengths, so a regression the step count cannot see (a step that got slower) shows beside
-//! one it can.
+//! one it can, and the time the same match takes through a `Pattern` prepared before timing.
 //!
 //! The workloads are the three shapes that make a backtracking matcher blow up, and one ordinary
 //! pattern for scale:
@@ -21,22 +21,17 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use byte_glob::{MatchOptions, match_steps, step_bound};
+use byte_glob::{MatchOptions, Pattern, match_steps, step_bound};
 
 const RUNS: usize = 7;
 
-/// The fastest of `RUNS` runs of `matches` matches of `pattern` against `name`, in nanoseconds per
-/// match.
-fn nanoseconds_per_match(matches: u32, pattern: &[u8], name: &[u8]) -> f64 {
+/// The fastest of `RUNS` runs of `matches` calls of `one_match`, in nanoseconds per call.
+fn nanoseconds_per_match(matches: u32, mut one_match: impl FnMut() -> bool) -> f64 {
     let mut fastest = f64::INFINITY;
     for _ in 0..RUNS {
         let start = Instant::now();
         for _ in 0..matches {
-            black_box(match_steps(
-                black_box(pattern),
-                black_box(name),
-                MatchOptions::new(),
-            ));
+            black_box(one_match());
         }
         let elapsed = start.elapsed().as_nanos() as f64 / f64::from(matches);
         fastest = fastest.min(elapsed);
@@ -45,11 +40,16 @@ fn nanoseconds_per_match(matches: u32, pattern: &[u8], name: &[u8]) -> f64 {
 }
 
 fn report(workload: &str, matches: u32, pattern: &[u8], name: &[u8]) {
-    let nanoseconds = nanoseconds_per_match(matches, pattern, name);
+    let nanoseconds = nanoseconds_per_match(matches, || {
+        match_steps(black_box(pattern), black_box(name), MatchOptions::new()).matched
+    });
+    let prepared = Pattern::new(pattern);
+    let prepared_nanoseconds =
+        nanoseconds_per_match(matches, || black_box(&prepared).matches(black_box(name)));
     let steps = match_steps(pattern, name, MatchOptions::new()).steps;
     println!(
         "{workload}: {nanoseconds:.0} nanoseconds a match, {steps} steps of a bound of {}, \
-         {:.1} nanoseconds a step",
+         {:.1} nanoseconds a step; {prepared_nanoseconds:.0} nanoseconds prepared",
         step_bound(pattern.len(), name.len()),
         nanoseconds / steps as f64,
     );

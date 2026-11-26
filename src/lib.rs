@@ -363,6 +363,104 @@ pub fn match_steps(pattern: &[u8], name: &[u8], options: MatchOptions) -> Outcom
     }
 }
 
+/// **A pattern prepared once, for matching against many names.**
+///
+/// [`Pattern::matches_with`] gives the same answer as [`matches_with`] for every name and every
+/// [`MatchOptions`], and a Kani proof checks that they agree. What preparing buys: the part of the
+/// pattern after its last `*` matches a fixed number of bytes, so a prepared pattern tests that
+/// part against the end of the name first, and runs the backtracking match only on the part
+/// before it. A name whose ending does not fit is refused without a backtrack, and a long run of
+/// `?` after a `*` costs one pass rather than one pass per byte the `*` could absorb.
+///
+/// It borrows the pattern and allocates nothing. [`Pattern::new`] reads the pattern once, at the
+/// cost of [`has_magic`]; for a pattern used once, [`matches()`] is as fast.
+///
+/// ```
+/// use byte_glob::Pattern;
+///
+/// let logs = Pattern::new(b"*.log");
+/// let names: [&[u8]; 3] = [b"server.log", b"notes.txt", b".hidden.log"];
+/// let matched: Vec<_> = names.iter().filter(|name| logs.matches(name)).collect();
+/// assert_eq!(matched, [&b"server.log"]);
+/// ```
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Pattern<'a> {
+    /// The pattern as given.
+    bytes: &'a [u8],
+    /// Where the part after the last `*` starts, and how many name bytes it matches; `None` when
+    /// the pattern has no `*`.
+    tail: Option<(usize, usize)>,
+    /// Whether the pattern opens with a literal `.`, for the leading-dot rule.
+    opens_with_a_literal_dot: bool,
+}
+
+impl<'a> Pattern<'a> {
+    /// Prepare `pattern`. Every byte string is a pattern, as it is for [`matches()`].
+    pub fn new(pattern: &'a [u8]) -> Self {
+        let mut tail = None;
+        let mut j = 0;
+        while let Some((elem, _)) = decode(pattern, j, 0, Case::Sensitive) {
+            j = match elem {
+                Element::Star => {
+                    tail = Some((j + 1, 0));
+                    j + 1
+                }
+                Element::Any { next }
+                | Element::Byte { next, .. }
+                | Element::Class { next, .. } => {
+                    if let Some((_, width)) = &mut tail {
+                        *width += 1;
+                    }
+                    next
+                }
+            };
+        }
+        Pattern {
+            bytes: pattern,
+            tail,
+            opens_with_a_literal_dot: opens_with_a_literal_dot(pattern),
+        }
+    }
+
+    /// **Does this pattern match `name`?** The same answer as [`matches()`].
+    pub fn matches(&self, name: &[u8]) -> bool {
+        self.matches_with(name, MatchOptions::new())
+    }
+
+    /// This pattern against `name` under `options`: the same answer as [`matches_with`].
+    pub fn matches_with(&self, name: &[u8], options: MatchOptions) -> bool {
+        if options.leading_dot == LeadingDot::Special
+            && name.first() == Some(&b'.')
+            && !self.opens_with_a_literal_dot
+        {
+            return false;
+        }
+        // The leading-dot rule is settled, so what follows matches with the dot ordinary.
+        let options = options.with_leading_dot(LeadingDot::Ordinary);
+        let Some((tail_start, tail_width)) = self.tail else {
+            return match_steps(self.bytes, name, options).matched;
+        };
+        let Some(head_width) = name.len().checked_sub(tail_width) else {
+            return false;
+        };
+        let (head_name, tail_name) = name.split_at(head_width);
+
+        // After the last `*` every element matches exactly one byte, so the tail lines up with
+        // the end of the name and needs no search.
+        let mut j = tail_start;
+        for &c in tail_name {
+            j = match decode(self.bytes, j, c, options.case) {
+                Some((Element::Any { next }, _)) => next,
+                Some((Element::Byte { byte, next }, _)) if same_byte(byte, c, options.case) => next,
+                Some((Element::Class { hit: true, next }, _)) => next,
+                _ => return false,
+            };
+        }
+        // The head ends in that `*`, which absorbs whatever the rest of the head leaves over.
+        match_steps(&self.bytes[..tail_start], head_name, options).matched
+    }
+}
+
 /// **The most steps a match of these two lengths can cost**, computable before matching starts.
 ///
 /// At most `name_bytes + 1` backtracks, between two of them `i + j` strictly increases up to

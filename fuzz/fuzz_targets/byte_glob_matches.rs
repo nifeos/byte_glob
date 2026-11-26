@@ -5,8 +5,8 @@
 //! the reference stays cheap. For every pair, under both leading-dot rules and both case rules:
 //!
 //! - nothing panics, and the step count is at most `step_bound` of the two lengths;
-//! - `match_steps`, `matches_with` and (under the default rule) `matches` agree with each other
-//!   and with the reference;
+//! - `match_steps`, `matches_with`, a prepared `Pattern` and (under the default rule) `matches`
+//!   agree with each other and with the reference;
 //! - a pattern with no magic names one fixed byte string (read from the reference's parse),
 //!   matches exactly that string under `LeadingDot::Ordinary`, and a pattern with magic does not.
 //!
@@ -17,7 +17,8 @@
 #![no_main]
 
 use byte_glob::{
-    Case, LeadingDot, MatchOptions, has_magic, match_steps, matches, matches_with, step_bound,
+    Case, LeadingDot, MatchOptions, Pattern, has_magic, match_steps, matches, matches_with,
+    step_bound,
 };
 use libfuzzer_sys::fuzz_target;
 
@@ -178,8 +179,17 @@ fuzz_target!(|data: &[u8]| {
     let name = &name[..name.len().min(MAXIMUM_BYTES)];
 
     let ordinary = MatchOptions::new().with_leading_dot(LeadingDot::Ordinary);
+    let prepared = Pattern::new(pattern);
     for options in [MatchOptions::new(), ordinary] {
         let folded = options.with_case(Case::AsciiInsensitive);
+        assert_eq!(
+            prepared.matches_with(name, folded),
+            matches_with(pattern, name, folded)
+        );
+        assert_eq!(
+            prepared.matches_with(name, options),
+            matches_with(pattern, name, options)
+        );
         let outcome = match_steps(pattern, name, folded);
         assert!(outcome.steps <= step_bound(pattern.len(), name.len()));
         assert_eq!(outcome.matched, matches_with(pattern, name, folded));
