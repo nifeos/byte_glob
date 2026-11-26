@@ -3,13 +3,13 @@ Falsifies `byte_glob::verification::no_magic_means_the_pattern_is_its_own_only_m
 The defect: the test-only helper `literal` copies the pattern byte at the escape rather than the byte the escape names, so `\*`
 comes out as a backslash while the matcher still treats it as `*`.
 
-Expected to fail: the harness's `assert_eq!(matches_with(p, n, LeadingDot::Ordinary), n == lit)`.
+Expected to fail: the harness's `assert_eq!(matches_with(p, n, ORDINARY), n == lit)`.
 
 diff --git a/src/lib.rs b/src/lib.rs
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -129,7 +129,8 @@
-     while let Some((elem, _)) = decode(pattern, j, 0) {
+@@ -254,7 +254,8 @@ fn literal<'a>(pattern: &[u8], out: &'a mut [u8]) -> Option<&'a [u8]> {
+     while let Some((elem, _)) = decode(pattern, j, 0, Case::Sensitive) {
          match elem {
              Element::Byte { byte, next } => {
 -                *out.get_mut(n)? = byte;

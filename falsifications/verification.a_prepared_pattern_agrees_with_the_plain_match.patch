@@ -1,0 +1,20 @@
+Falsifies `byte_glob::verification::a_prepared_pattern_agrees_with_the_plain_match`.
+
+The defect: a prepared pattern checks only the tail after the last `*` and never matches the head, so
+`a*b` prepared matches `xb`.
+
+Expected to fail: the harness's `assert_eq!(Pattern::new(p).matches_with(n, options), matches_with(p, n, options))`.
+
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -491,7 +491,8 @@ impl<'a> Pattern<'a> {
+             };
+         }
+         // The head ends in that `*`, which absorbs whatever the rest of the head leaves over.
+-        match_steps(&self.bytes[..tail_start], head_name, options).matched
++        let _ = head_name;
++        true
+     }
+ }
+ 

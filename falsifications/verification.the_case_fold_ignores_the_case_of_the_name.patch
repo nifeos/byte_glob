@@ -1,0 +1,19 @@
+Falsifies `byte_glob::verification::the_case_fold_ignores_the_case_of_the_name`.
+
+The defect: under the case fold, `class_at` tests only the name's byte and never its other case, so `[a]`
+matches `a` but not `A` while a literal `a` matches both.
+
+Expected to fail: the harness's `assert_eq!` of the match on the name and on the lowercased name.
+
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -612,7 +612,7 @@ fn class_at(pattern: &[u8], open: usize, c: u8, case: Case) -> (Option<(bool, us
+     // Under a fold, the name's byte is a member when either case of it is. `other` is `c` itself
+     // for a byte that is not an ASCII letter, and under `Case::Sensitive`.
+     let other = match case {
+-        Case::AsciiInsensitive => other_case(c),
++        Case::AsciiInsensitive => c,
+         Case::Sensitive => c,
+     };
+     let mut k = open + 1;
