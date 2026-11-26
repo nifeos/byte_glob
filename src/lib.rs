@@ -295,11 +295,24 @@ pub struct Outcome {
 /// assert!(outcome.steps <= step_bound(5, 4));
 /// ```
 pub fn match_steps(pattern: &[u8], name: &[u8], options: MatchOptions) -> Outcome {
+    // One copy of the loop per case rule, so the common case-sensitive match pays nothing for the
+    // fold: with the rule a constant, the compiler drops the test of it from every step.
+    match options.case {
+        Case::Sensitive => match_steps_under(pattern, name, options.leading_dot, Case::Sensitive),
+        Case::AsciiInsensitive => {
+            match_steps_under(pattern, name, options.leading_dot, Case::AsciiInsensitive)
+        }
+    }
+}
+
+/// [`match_steps`] under one case rule, inlined into each arm of its `match` on the rule.
+#[inline(always)]
+fn match_steps_under(pattern: &[u8], name: &[u8], leading_dot: LeadingDot, case: Case) -> Outcome {
     let mut steps = 0usize;
 
     // The leading-dot rule, applied once and up front. It is a property of the two strings' first
     // bytes, so putting it in the loop would only mean asking it repeatedly.
-    if options.leading_dot == LeadingDot::Special
+    if leading_dot == LeadingDot::Special
         && name.first() == Some(&b'.')
         && !opens_with_a_literal_dot(pattern)
     {
@@ -334,7 +347,7 @@ pub fn match_steps(pattern: &[u8], name: &[u8], options: MatchOptions) -> Outcom
             };
         }
 
-        let advanced = match decode(pattern, j, name[i], options.case) {
+        let advanced = match decode(pattern, j, name[i], case) {
             // Pattern exhausted with name left over. Not a match here; the backtrack below decides
             // whether an earlier `*` can swallow the remainder.
             None => false,
@@ -353,7 +366,7 @@ pub fn match_steps(pattern: &[u8], name: &[u8], options: MatchOptions) -> Outcom
                         true
                     }
                     Element::Byte { byte, next } => {
-                        if literal_matches(byte, name[i], options.case) {
+                        if literal_matches(byte, name[i], case) {
                             i += 1;
                             j = next;
                             true
@@ -562,6 +575,7 @@ enum Element {
 /// `None` at the end of the pattern. Every other input decodes to something: this is where "there
 /// is no malformed pattern" is implemented, by turning an unclosed `[` and a trailing `\` into the
 /// bytes they are.
+#[inline(always)]
 fn decode(pattern: &[u8], j: usize, c: u8, case: Case) -> Option<(Element, usize)> {
     let byte = *pattern.get(j)?;
     let elem = match byte {
@@ -612,6 +626,7 @@ fn decode(pattern: &[u8], j: usize, c: u8, case: Case) -> Option<(Element, usize
 /// literal byte. `scanned` is charged either way. A `!` or `^` right after `[` negates; a `]` right
 /// after that is a member; a `-` is a range only before a byte that is not the terminator, so
 /// `[a-]` and `[-a]` both mean "a hyphen or an a".
+#[inline(always)]
 fn class_at(pattern: &[u8], open: usize, c: u8, case: Case) -> (Option<(bool, usize)>, usize) {
     // Under a fold, the name's byte is a member when either case of it is. `other` is `c` itself
     // for a byte that is not an ASCII letter, and under `Case::Sensitive`.
@@ -676,6 +691,7 @@ fn class_at(pattern: &[u8], open: usize, c: u8, case: Case) -> (Option<(bool, us
 }
 
 /// Does a literal byte of the pattern match this byte of the name, under this case rule?
+#[inline(always)]
 fn literal_matches(literal: u8, c: u8, case: Case) -> bool {
     match case {
         Case::Sensitive => literal == c,
