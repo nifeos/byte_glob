@@ -714,3 +714,12 @@ fn a_prepared_pattern_agrees_at_length() {
     long[4095] = b'b';
     assert!(Pattern::new(&tail).matches_with(&long, ORDINARY));
 }
+
+#[test]
+fn the_case_fold_charges_its_second_pass_over_a_class() {
+    // `[a]` costs three pattern bytes to scan. Against a letter the fold scans it again for the
+    // other case, and the step count says so; a byte with no other case costs no second pass.
+    assert_eq!(match_steps(b"[a]", b"a", ORDINARY).steps, 3);
+    assert_eq!(match_steps(b"[a]", b"A", FOLDED).steps, 6);
+    assert_eq!(match_steps(b"[1]", b"1", FOLDED).steps, 3);
+}
