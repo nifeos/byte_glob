@@ -76,9 +76,11 @@ fn the_cost_never_exceeds_the_bound() {
 /// pattern of up to three arbitrary bytes, escape corners and unterminated brackets included.
 /// The shell's grant planner rests on it: if [`has_magic`] says no, it asks for one name.
 /// Stated with [`LeadingDot::Ordinary`], as the next two harnesses are; the leading-dot policy has
-/// its own harness, and a symbolic choice here doubled the solver's time.
+/// its own harness, and a symbolic choice here doubled the solver's time. With no `*` there is no
+/// backtrack, so every loop ends within five passes, and Kani's unwinding checks confirm it: the
+/// bound of the other harnesses took this one nine minutes.
 #[kani::proof]
-#[kani::unwind(11)]
+#[kani::unwind(5)]
 fn no_magic_means_the_pattern_is_its_own_only_match() {
     let pattern: [u8; P] = kani::any();
     let name: [u8; N] = kani::any();
