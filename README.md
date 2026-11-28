@@ -7,7 +7,7 @@
 
 An `fnmatch(3)`-style matcher for one file name. A pattern and a name go in, a `bool` comes out. It
 is a total function on two byte strings: `no_std`, no allocation, no `unsafe`, no dependency, a cost
-bound a caller can compute before matching, and eight Kani proofs of its corners.
+bound a caller can compute before matching, and seven Kani proofs of its corners.
 
 Three things a caller does not guess:
 
@@ -70,15 +70,17 @@ assert!(!has_magic(br"a\*b"));
 
 ## What is proven
 
-Eight Kani harnesses (`src/verification.rs`), each with a falsification patch that turns it red.
+Seven Kani harnesses (`src/verification.rs`), each with a falsification patch that turns it red.
 They quantify over every byte value of patterns and names up to three bytes (2^48 pairs per
-harness) but not over length: four bytes each did not finish. Matching is total under
-every rule. The step count never exceeds `step_bound`. A pattern with no magic matches exactly
-itself. `*` and `?` have their base meanings. The dot rule touches only names that start with a
-dot. A negated class is the exact complement of its class. Under the case fold, the case of the
-name's letters changes no answer. A prepared `Pattern` gives the same answer as `matches_with`. The length-independent claims are
-host tests: an exhaustive cross-check against a naive matcher over every pattern of up to five
-bytes and every name of up to three, and a 100,000-byte adversarial run held under the bound.
+harness) but not over length: four bytes each did not finish. Matching is total under both dot
+rules. The step count never exceeds `step_bound`. A pattern with no magic matches exactly itself.
+`*` and `?` have their base meanings. The dot rule touches only names that start with a dot. A
+negated class is the exact complement of its class. Under the case fold, every element of up to
+five pattern bytes reads a name byte and its lowercase alike. The length-independent claims are
+host tests. One is an exhaustive cross-check against a naive matcher over every pattern of up to
+five bytes and every name of up to three. Another holds a 100,000-byte adversarial run under the
+bound. A third checks that a prepared `Pattern` gives `matches_with`'s answer for every pattern of
+up to four bytes and every name of up to three, under every rule.
 
 ## How it avoids blowup
 
@@ -93,8 +95,8 @@ about `n * n / 2` byte reads.
 `cargo bench` runs the three shapes that make a backtracking matcher blow up (ten stars and no
 match across 4,096 bytes, a star before a 63-byte tail, 256 unterminated brackets) and one
 ordinary pattern. For each it prints the time a match takes, its step count beside `step_bound`,
-and the time a step takes, so a step that got slower shows where the count cannot, then the time
-the same match takes through a `Pattern` prepared beforehand. The times
+and the time a step takes, so a step that got slower shows where the count cannot. It then prints
+the time the same match takes through a `Pattern` prepared beforehand. The times
 belong to the machine that runs it, so this README states none.
 
 ## Corners

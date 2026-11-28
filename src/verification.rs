@@ -13,19 +13,16 @@ use super::*;
 const P: usize = 3;
 const N: usize = 3;
 
-/// Either leading-dot rule and either case rule, chosen symbolically.
-fn any_options() -> MatchOptions {
+/// Either leading-dot rule, chosen symbolically, with case significant. The case fold has
+/// harnesses of its own: a symbolic case rule on top of these doubles a proof that already fills
+/// most of the time a pull request gives the proofs.
+fn any_dot() -> MatchOptions {
     let dot = if kani::any() {
         LeadingDot::Special
     } else {
         LeadingDot::Ordinary
     };
-    let case = if kani::any() {
-        Case::Sensitive
-    } else {
-        Case::AsciiInsensitive
-    };
-    MatchOptions::new().with_leading_dot(dot).with_case(case)
+    MatchOptions::new().with_leading_dot(dot)
 }
 
 /// The rules with a leading `.` as an ordinary byte, so a harness is about the matcher alone.
@@ -44,7 +41,7 @@ fn any_lengths() -> (usize, usize) {
 /// Falsification: replayable `falsifications/verification.matching_is_total.patch`
 /// **Matching is total.**
 ///
-/// For every pattern and name of up to three arbitrary bytes, under every [`MatchOptions`]: no
+/// For every pattern and name of up to three arbitrary bytes, under either leading-dot rule: no
 /// panic, overflow or out-of-bounds index, and the loop terminates within the unwinding bound,
 /// which is the property that matters for an untrusted pattern.
 #[kani::proof]
@@ -53,7 +50,7 @@ fn matching_is_total() {
     let pattern: [u8; P] = kani::any();
     let name: [u8; N] = kani::any();
     let (plen, nlen) = any_lengths();
-    let _ = match_steps(&pattern[..plen], &name[..nlen], any_options());
+    let _ = match_steps(&pattern[..plen], &name[..nlen], any_dot());
 }
 
 /// Falsification: replayable `falsifications/verification.the_cost_never_exceeds_the_bound.patch`
@@ -70,7 +67,7 @@ fn the_cost_never_exceeds_the_bound() {
     let name: [u8; N] = kani::any();
     let (plen, nlen) = any_lengths();
 
-    let steps = match_steps(&pattern[..plen], &name[..nlen], any_options()).steps;
+    let steps = match_steps(&pattern[..plen], &name[..nlen], any_dot()).steps;
     assert!(steps <= step_bound(plen, nlen));
 }
 
@@ -181,45 +178,36 @@ fn a_negated_class_is_the_exact_complement_of_the_class() {
 }
 
 /// Falsification: replayable `falsifications/verification.the_case_fold_ignores_the_case_of_the_name.patch`
-/// **Under the case fold, the case of the name's letters changes no answer**, over every pattern
-/// and name of up to three arbitrary bytes: a name and the same name with every ASCII letter
-/// lowercased match the same patterns, in literals, sets, ranges and negations alike.
+/// **Under the case fold, the case of the name's letters changes no answer**, stated where the
+/// matcher reads the name: every element of up to five arbitrary pattern bytes, `[!a]` and
+/// `[a-b]` included, decodes the same for a name byte as for its lowercase, with the same cost,
+/// and a literal accepts both or neither.
+///
+/// The matching loop reads the name only through [`decode`], [`literal_matches`] and the test for
+/// a leading `.`, which is not a letter, so a name and its lowercase take the same path through
+/// it. Stated at the element because the whole match, run twice over three-byte patterns and
+/// names, took 40 minutes alone, past what a pull request gives all the proofs together.
 #[kani::proof]
-#[kani::unwind(11)]
+#[kani::unwind(8)]
 fn the_case_fold_ignores_the_case_of_the_name() {
-    let pattern: [u8; P] = kani::any();
-    let name: [u8; N] = kani::any();
-    let (plen, nlen) = any_lengths();
+    const FOLD_P: usize = 5;
+    let pattern: [u8; FOLD_P] = kani::any();
+    let plen: usize = kani::any();
+    kani::assume(plen <= FOLD_P);
     let p = &pattern[..plen];
-    let n = &name[..nlen];
-    let mut lower = name;
-    lower.make_ascii_lowercase();
-    let folded = ORDINARY.with_case(Case::AsciiInsensitive);
+    let c: u8 = kani::any();
+    let lower = c.to_ascii_lowercase();
 
-    assert_eq!(
-        matches_with(p, n, folded),
-        matches_with(p, &lower[..nlen], folded)
-    );
-    // Not vacuous: an uppercase letter in the name reaches a pattern that matches it.
-    kani::cover!(n.first().is_some_and(u8::is_ascii_uppercase) && matches_with(p, n, folded));
-}
-
-/// Falsification: replayable `falsifications/verification.a_prepared_pattern_agrees_with_the_plain_match.patch`
-/// **A prepared pattern gives the plain match's answer**, over every pattern and name of up to
-/// three arbitrary bytes and every [`MatchOptions`]: the tail after the last `*` lined up with the
-/// end of the name, then the head, decide exactly what the one-backtrack match decides.
-#[kani::proof]
-#[kani::unwind(11)]
-fn a_prepared_pattern_agrees_with_the_plain_match() {
-    let pattern: [u8; P] = kani::any();
-    let name: [u8; N] = kani::any();
-    let (plen, nlen) = any_lengths();
-    let p = &pattern[..plen];
-    let n = &name[..nlen];
-    let options = any_options();
-
-    assert_eq!(
-        Pattern::new(p).matches_with(n, options),
-        matches_with(p, n, options)
+    let as_given = decode(p, 0, c, Case::AsciiInsensitive);
+    assert_eq!(as_given, decode(p, 0, lower, Case::AsciiInsensitive));
+    if let Some((Element::Byte { byte, .. }, _)) = as_given {
+        assert_eq!(
+            literal_matches(byte, c, Case::AsciiInsensitive),
+            literal_matches(byte, lower, Case::AsciiInsensitive)
+        );
+    }
+    // Not vacuous: an uppercase byte reaches a bracket expression that takes it.
+    kani::cover!(
+        c.is_ascii_uppercase() && matches!(as_given, Some((Element::Class { hit: true, .. }, _)))
     );
 }

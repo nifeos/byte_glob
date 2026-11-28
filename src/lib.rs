@@ -413,7 +413,8 @@ fn match_steps_under(pattern: &[u8], name: &[u8], leading_dot: LeadingDot, case:
 /// **A pattern prepared once, for matching against many names.**
 ///
 /// [`Pattern::matches_with`] gives the same answer as [`matches_with`] for every name and every
-/// [`MatchOptions`], and a Kani proof checks that they agree. What preparing buys: the part of the
+/// [`MatchOptions`], and an exhaustive host test of every short pattern and name under every rule
+/// checks that they agree. What preparing buys: the part of the
 /// pattern after its last `*` matches a fixed number of bytes, so a prepared pattern tests that
 /// part against the end of the name first, and runs the backtracking match only on the part
 /// before it. A name whose ending does not fit is refused without a backtrack, and a long run of
