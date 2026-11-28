@@ -1,0 +1,20 @@
+Falsifies `byte_glob::verification::the_case_fold_ignores_the_case_of_the_name`.
+
+The defect: under the case fold, `folded_class` never asks the bracket expression about the other case of
+the name's byte, so `[a]` matches `a` but not `A` while a literal `a` matches both.
+
+Expected to fail: the harness's `assert_eq!` of the element decoded for the name's byte and for its
+lowercase.
+
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -697,7 +697,7 @@ fn class_at(pattern: &[u8], open: usize, c: u8) -> (Option<(bool, usize)>, usize
+ /// which is both cases hitting the complement. A byte that is not an ASCII letter has no other
+ /// case and costs no second pass.
+ fn folded_class(pattern: &[u8], open: usize, c: u8, hit: bool) -> (bool, usize) {
+-    let other = other_case(c);
++    let other = c;
+     if other == c {
+         return (hit, 0);
+     }

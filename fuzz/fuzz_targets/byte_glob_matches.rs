@@ -2,11 +2,11 @@
 //! longer than the host tests' exhaustive cross-check reaches.
 //!
 //! The first byte splits the rest of the input into a pattern and a name, each cut to 64 bytes so
-//! the reference stays cheap. For every pair, under both leading-dot rules:
+//! the reference stays cheap. For every pair, under both leading-dot rules and both case rules:
 //!
 //! - nothing panics, and the step count is at most `step_bound` of the two lengths;
-//! - `match_steps`, `matches_with` and (under the default rule) `matches` agree with each other
-//!   and with the reference;
+//! - `match_steps`, `matches_with`, a prepared `Pattern` and (under the default rule) `matches`
+//!   agree with each other and with the reference;
 //! - a pattern with no magic names one fixed byte string (read from the reference's parse),
 //!   matches exactly that string under `LeadingDot::Ordinary`, and a pattern with magic does not.
 //!
@@ -16,7 +16,10 @@
 
 #![no_main]
 
-use byte_glob::{LeadingDot, has_magic, match_steps, matches, matches_with, step_bound};
+use byte_glob::{
+    Case, LeadingDot, MatchOptions, Pattern, has_magic, match_steps, matches, matches_with,
+    step_bound,
+};
 use libfuzzer_sys::fuzz_target;
 
 const MAXIMUM_BYTES: usize = 64;
@@ -29,13 +32,14 @@ enum Element {
     Any,
     /// One byte, however it was written.
     Byte(u8),
-    /// A closed bracket expression, as the set of bytes it matches, negation applied.
-    Class([bool; 256]),
+    /// A closed bracket expression: the set of bytes its body names, and whether it is negated.
+    /// The negation applies after the case fold, so it is kept apart from the set.
+    Class([bool; 256], bool),
 }
 
-/// Parse a bracket expression opened at `open`: the set it matches and the index after its `]`,
-/// or `None` when no `]` closes it.
-fn class(pattern: &[u8], open: usize) -> Option<([bool; 256], usize)> {
+/// Parse a bracket expression opened at `open`: the set its body names, whether it is negated, and
+/// the index after its `]`, or `None` when no `]` closes it.
+fn class(pattern: &[u8], open: usize) -> Option<([bool; 256], bool, usize)> {
     let mut k = open + 1;
     let negated = matches!(pattern.get(k), Some(b'!' | b'^'));
     if negated {
@@ -46,12 +50,7 @@ fn class(pattern: &[u8], open: usize) -> Option<([bool; 256], usize)> {
     loop {
         let byte = *pattern.get(k)?;
         if byte == b']' && !first {
-            if negated {
-                for member in &mut set {
-                    *member = !*member;
-                }
-            }
-            return Some((set, k + 1));
+            return Some((set, negated, k + 1));
         }
         first = false;
         // A backslash inside a class escapes the byte after it, when there is one.
@@ -108,8 +107,8 @@ fn parse(pattern: &[u8]) -> Vec<Element> {
                 }
             },
             b'[' => match class(pattern, j) {
-                Some((set, next)) => {
-                    elements.push(Element::Class(set));
+                Some((set, negated, next)) => {
+                    elements.push(Element::Class(set, negated));
                     j = next;
                 }
                 None => {
@@ -127,14 +126,21 @@ fn parse(pattern: &[u8]) -> Vec<Element> {
 }
 
 /// The reference matcher: a table over every pair of suffixes, filled from the end.
-fn reference_matches(pattern: &[u8], name: &[u8], dot: LeadingDot) -> bool {
+fn reference_matches(pattern: &[u8], name: &[u8], options: MatchOptions) -> bool {
     let elements = parse(pattern);
-    if dot == LeadingDot::Special
+    if options.leading_dot == LeadingDot::Special
         && name.first() == Some(&b'.')
         && !matches!(elements.first(), Some(Element::Byte(b'.')))
     {
         return false;
     }
+    let folded = options.case == Case::AsciiInsensitive;
+    // Under the fold, a name byte stands for both its cases: the reference asks of the byte, its
+    // lowercase and its uppercase.
+    let either = |test: &dyn Fn(u8) -> bool, byte: u8| {
+        test(byte)
+            || (folded && (test(byte.to_ascii_lowercase()) || test(byte.to_ascii_uppercase())))
+    };
     let width = name.len() + 1;
     // `table[j * width + i]`: elements `j..` match name bytes `i..`.
     let mut table = vec![false; (elements.len() + 1) * width];
@@ -147,10 +153,14 @@ fn reference_matches(pattern: &[u8], name: &[u8], dot: LeadingDot) -> bool {
                 }
                 Element::Any => i < name.len() && table[(j + 1) * width + i + 1],
                 Element::Byte(byte) => {
-                    i < name.len() && name[i] == *byte && table[(j + 1) * width + i + 1]
+                    i < name.len()
+                        && either(&|c| c == *byte, name[i])
+                        && table[(j + 1) * width + i + 1]
                 }
-                Element::Class(set) => {
-                    i < name.len() && set[usize::from(name[i])] && table[(j + 1) * width + i + 1]
+                Element::Class(set, negated) => {
+                    i < name.len()
+                        && either(&|c| set[usize::from(c)], name[i]) != *negated
+                        && table[(j + 1) * width + i + 1]
                 }
             };
             table[j * width + i] = here;
@@ -168,15 +178,31 @@ fuzz_target!(|data: &[u8]| {
     let pattern = &pattern[..pattern.len().min(MAXIMUM_BYTES)];
     let name = &name[..name.len().min(MAXIMUM_BYTES)];
 
-    for dot in [LeadingDot::Special, LeadingDot::Ordinary] {
-        let outcome = match_steps(pattern, name, dot);
+    let ordinary = MatchOptions::new().with_leading_dot(LeadingDot::Ordinary);
+    let prepared = Pattern::new(pattern);
+    for options in [MatchOptions::new(), ordinary] {
+        let folded = options.with_case(Case::AsciiInsensitive);
+        assert_eq!(
+            prepared.matches_with(name, folded),
+            matches_with(pattern, name, folded)
+        );
+        assert_eq!(
+            prepared.matches_with(name, options),
+            matches_with(pattern, name, options)
+        );
+        let outcome = match_steps(pattern, name, folded);
         assert!(outcome.steps <= step_bound(pattern.len(), name.len()));
-        assert_eq!(outcome.matched, matches_with(pattern, name, dot));
-        assert_eq!(outcome.matched, reference_matches(pattern, name, dot));
+        assert_eq!(outcome.matched, matches_with(pattern, name, folded));
+        assert_eq!(outcome.matched, reference_matches(pattern, name, folded));
+
+        let outcome = match_steps(pattern, name, options);
+        assert!(outcome.steps <= step_bound(pattern.len(), name.len()));
+        assert_eq!(outcome.matched, matches_with(pattern, name, options));
+        assert_eq!(outcome.matched, reference_matches(pattern, name, options));
     }
     assert_eq!(
         matches(pattern, name),
-        matches_with(pattern, name, LeadingDot::Special)
+        matches_with(pattern, name, MatchOptions::default())
     );
 
     // The reference parse names the fixed string a magic-free pattern stands for: all its elements
@@ -190,9 +216,9 @@ fuzz_target!(|data: &[u8]| {
         .collect();
     assert_eq!(has_magic(pattern), fixed.is_none());
     if let Some(named) = fixed {
-        assert!(matches_with(pattern, &named, LeadingDot::Ordinary));
+        assert!(matches_with(pattern, &named, ordinary));
         assert_eq!(
-            matches_with(pattern, name, LeadingDot::Ordinary),
+            matches_with(pattern, name, ordinary),
             name == named.as_slice()
         );
     }

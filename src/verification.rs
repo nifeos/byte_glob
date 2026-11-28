@@ -13,14 +13,20 @@ use super::*;
 const P: usize = 3;
 const N: usize = 3;
 
-/// Either leading-dot rule, chosen symbolically.
-fn any_dot() -> LeadingDot {
-    if kani::any() {
+/// Either leading-dot rule, chosen symbolically, with case significant. The case fold has
+/// harnesses of its own: a symbolic case rule on top of these doubles a proof that already fills
+/// most of the time a pull request gives the proofs.
+fn any_dot() -> MatchOptions {
+    let dot = if kani::any() {
         LeadingDot::Special
     } else {
         LeadingDot::Ordinary
-    }
+    };
+    MatchOptions::new().with_leading_dot(dot)
 }
+
+/// The rules with a leading `.` as an ordinary byte, so a harness is about the matcher alone.
+const ORDINARY: MatchOptions = MatchOptions::new().with_leading_dot(LeadingDot::Ordinary);
 
 /// Two symbolic lengths, within the bound above, so the empty pattern, the empty name and a
 /// pattern that ends mid-class are all reached. Symbolic length is the costliest thing here.
@@ -35,7 +41,7 @@ fn any_lengths() -> (usize, usize) {
 /// Falsification: replayable `falsifications/verification.matching_is_total.patch`
 /// **Matching is total.**
 ///
-/// For every pattern and name of up to three arbitrary bytes, under both [`LeadingDot`] settings: no
+/// For every pattern and name of up to three arbitrary bytes, under either leading-dot rule: no
 /// panic, overflow or out-of-bounds index, and the loop terminates within the unwinding bound,
 /// which is the property that matters for an untrusted pattern.
 #[kani::proof]
@@ -70,9 +76,11 @@ fn the_cost_never_exceeds_the_bound() {
 /// pattern of up to three arbitrary bytes, escape corners and unterminated brackets included.
 /// The shell's grant planner rests on it: if [`has_magic`] says no, it asks for one name.
 /// Stated with [`LeadingDot::Ordinary`], as the next two harnesses are; the leading-dot policy has
-/// its own harness, and a symbolic choice here doubled the solver's time.
+/// its own harness, and a symbolic choice here doubled the solver's time. With no `*` there is no
+/// backtrack, so every loop ends within five passes, and Kani's unwinding checks confirm it: the
+/// bound of the other harnesses took this one nine minutes.
 #[kani::proof]
-#[kani::unwind(11)]
+#[kani::unwind(5)]
 fn no_magic_means_the_pattern_is_its_own_only_match() {
     let pattern: [u8; P] = kani::any();
     let name: [u8; N] = kani::any();
@@ -84,7 +92,7 @@ fn no_magic_means_the_pattern_is_its_own_only_match() {
     kani::assume(!has_magic(p));
     let mut buf = [0u8; P];
     let lit = literal(p, &mut buf).expect("a magic-free pattern always has a literal");
-    assert_eq!(matches_with(p, n, LeadingDot::Ordinary), n == lit);
+    assert_eq!(matches_with(p, n, ORDINARY), n == lit);
 }
 
 /// Falsification: replayable `falsifications/verification.star_matches_anything_and_question_matches_one_byte.patch`
@@ -101,12 +109,12 @@ fn star_matches_anything_and_question_matches_one_byte() {
     kani::assume(nlen <= N);
     let n = &name[..nlen];
 
-    assert!(matches_with(b"*", n, LeadingDot::Ordinary));
-    assert!(matches_with(b"**", n, LeadingDot::Ordinary));
-    assert_eq!(matches_with(b"?", n, LeadingDot::Ordinary), nlen == 1);
-    assert_eq!(matches_with(b"??", n, LeadingDot::Ordinary), nlen == 2);
+    assert!(matches_with(b"*", n, ORDINARY));
+    assert!(matches_with(b"**", n, ORDINARY));
+    assert_eq!(matches_with(b"?", n, ORDINARY), nlen == 1);
+    assert_eq!(matches_with(b"??", n, ORDINARY), nlen == 2);
     // `*` around anything still matches everything that thing matches.
-    assert_eq!(matches_with(b"*?*", n, LeadingDot::Ordinary), nlen >= 1);
+    assert_eq!(matches_with(b"*?*", n, ORDINARY), nlen >= 1);
 }
 
 /// Falsification: replayable `falsifications/verification.the_dot_rule_only_touches_names_that_start_with_a_dot.patch`
@@ -129,8 +137,8 @@ fn the_dot_rule_only_touches_names_that_start_with_a_dot() {
     let p = &pattern[..plen];
     let n = &name[..nlen];
 
-    let special = matches_with(p, n, LeadingDot::Special);
-    let ordinary = matches_with(p, n, LeadingDot::Ordinary);
+    let special = matches_with(p, n, MatchOptions::new());
+    let ordinary = matches_with(p, n, ORDINARY);
 
     if n.first() == Some(&b'.') {
         // Special is never more permissive, and is permissive only for a pattern that says `.`.
@@ -162,11 +170,46 @@ fn a_negated_class_is_the_exact_complement_of_the_class() {
     let name = [c];
 
     assert_eq!(
-        matches_with(&plain, &name, LeadingDot::Ordinary),
-        !matches_with(&negated, &name, LeadingDot::Ordinary)
+        matches_with(&plain, &name, ORDINARY),
+        !matches_with(&negated, &name, ORDINARY)
     );
     // Not vacuous: the range spelling is inside the quantifier, so this is a claim about `[a-b]`
     // as well as about `[ab]`.
     kani::cover!(body[1] == b'-');
-    kani::cover!(matches_with(&plain, &name, LeadingDot::Ordinary));
+    kani::cover!(matches_with(&plain, &name, ORDINARY));
+}
+
+/// Falsification: replayable `falsifications/verification.the_case_fold_ignores_the_case_of_the_name.patch`
+/// **Under the case fold, the case of the name's letters changes no answer**, stated where the
+/// matcher reads the name: every element of up to five arbitrary pattern bytes, `[!a]` and
+/// `[a-b]` included, decodes the same for a name byte as for its lowercase, with the same cost,
+/// and a literal accepts both or neither.
+///
+/// The matching loop reads the name only through [`decode`], [`literal_matches`] and the test for
+/// a leading `.`, which is not a letter, so a name and its lowercase take the same path through
+/// it. Stated at the element because the whole match, run twice over three-byte patterns and
+/// names, took 40 minutes alone, past what a pull request gives all the proofs together.
+#[kani::proof]
+#[kani::unwind(8)]
+fn the_case_fold_ignores_the_case_of_the_name() {
+    const FOLD_P: usize = 5;
+    let pattern: [u8; FOLD_P] = kani::any();
+    let plen: usize = kani::any();
+    kani::assume(plen <= FOLD_P);
+    let p = &pattern[..plen];
+    let c: u8 = kani::any();
+    let lower = c.to_ascii_lowercase();
+
+    let as_given = decode(p, 0, c, Case::AsciiInsensitive);
+    assert_eq!(as_given, decode(p, 0, lower, Case::AsciiInsensitive));
+    if let Some((Element::Byte { byte, .. }, _)) = as_given {
+        assert_eq!(
+            literal_matches(byte, c, Case::AsciiInsensitive),
+            literal_matches(byte, lower, Case::AsciiInsensitive)
+        );
+    }
+    // Not vacuous: an uppercase byte reaches a bracket expression that takes it.
+    kani::cover!(
+        c.is_ascii_uppercase() && matches!(as_given, Some((Element::Class { hit: true, .. }, _)))
+    );
 }

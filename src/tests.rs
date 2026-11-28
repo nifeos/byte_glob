@@ -3,6 +3,15 @@
 
 use super::*;
 
+/// The rules with a leading `.` as an ordinary byte, so a test is about the matcher alone.
+const ORDINARY: MatchOptions = MatchOptions::new().with_leading_dot(LeadingDot::Ordinary);
+
+/// Both leading-dot rules, for a test that holds under either.
+const BOTH_DOT_RULES: [MatchOptions; 2] = [MatchOptions::new(), ORDINARY];
+
+/// [`ORDINARY`] with ASCII letters matching either case.
+const FOLDED: MatchOptions = ORDINARY.with_case(Case::AsciiInsensitive);
+
 #[test]
 fn a_literal_pattern_matches_itself_and_nothing_else() {
     assert!(matches(b"notes.txt", b"notes.txt"));
@@ -117,9 +126,9 @@ fn a_leading_dot_is_special_by_default() {
     assert!(matches(b"a*", b"a.config"));
 
     // And the rule is switchable, because it is a policy.
-    assert!(matches_with(b"*", b".config", LeadingDot::Ordinary));
-    assert!(matches_with(b"?", b".", LeadingDot::Ordinary));
-    assert!(matches_with(b"[.]config", b".config", LeadingDot::Ordinary));
+    assert!(matches_with(b"*", b".config", ORDINARY));
+    assert!(matches_with(b"?", b".", ORDINARY));
+    assert!(matches_with(b"[.]config", b".config", ORDINARY));
 }
 
 #[test]
@@ -151,22 +160,14 @@ fn no_magic_means_the_literal_is_the_only_match() {
         let mut buf = [0u8; 32];
         let len = literal(pattern, &mut buf).expect("no magic").len();
         assert!(
-            matches_with(pattern, &buf[..len], LeadingDot::Ordinary),
+            matches_with(pattern, &buf[..len], ORDINARY),
             "{pattern:?} should match its own literal"
         );
         // And nothing else: a byte appended or removed breaks it.
         buf[len] = b'x';
-        assert!(!matches_with(
-            pattern,
-            &buf[..len + 1],
-            LeadingDot::Ordinary
-        ));
+        assert!(!matches_with(pattern, &buf[..len + 1], ORDINARY));
         if len > 0 {
-            assert!(!matches_with(
-                pattern,
-                &buf[..len - 1],
-                LeadingDot::Ordinary
-            ));
+            assert!(!matches_with(pattern, &buf[..len - 1], ORDINARY));
         }
     }
 }
@@ -180,17 +181,22 @@ fn no_magic_means_the_literal_is_the_only_match() {
 /// cross-check below compares is therefore the **search strategy** and nothing else: if the two
 /// disagree, the greedy single-backtrack loop is wrong, not the syntax.
 fn naive_matches(pattern: &[u8], name: &[u8], j: usize, i: usize) -> bool {
+    matches_naively(pattern, name, j, i, Case::Sensitive)
+}
+
+/// [`naive_matches`] under a case rule.
+fn matches_naively(pattern: &[u8], name: &[u8], j: usize, i: usize, case: Case) -> bool {
     // Past the end of the name the byte does not matter: every arm that could read it returns
     // false first.
     let c = name.get(i).copied().unwrap_or(0);
-    let Some((elem, _)) = decode(pattern, j, c) else {
+    let Some((elem, _)) = decode(pattern, j, c, case) else {
         return i == name.len();
     };
     match elem {
         Element::Star => {
             let mut absorbed = i;
             loop {
-                if naive_matches(pattern, name, j + 1, absorbed) {
+                if matches_naively(pattern, name, j + 1, absorbed, case) {
                     return true;
                 }
                 if absorbed == name.len() {
@@ -200,11 +206,12 @@ fn naive_matches(pattern: &[u8], name: &[u8], j: usize, i: usize) -> bool {
             }
         }
         _ if i >= name.len() => false,
-        Element::Any { next } => naive_matches(pattern, name, next, i + 1),
+        Element::Any { next } => matches_naively(pattern, name, next, i + 1, case),
         Element::Byte { byte, next } => {
-            byte == name[i] && naive_matches(pattern, name, next, i + 1)
+            literal_matches(byte, name[i], case)
+                && matches_naively(pattern, name, next, i + 1, case)
         }
-        Element::Class { hit, next } => hit && naive_matches(pattern, name, next, i + 1),
+        Element::Class { hit, next } => hit && matches_naively(pattern, name, next, i + 1, case),
     }
 }
 
@@ -247,7 +254,7 @@ fn greedy_agrees_with_exhaustive_search_over_every_short_pattern() {
                         v /= NAME.len() as u64;
                     }
                     let n = &name[..nlen];
-                    let fast = matches_with(p, n, LeadingDot::Ordinary);
+                    let fast = matches_with(p, n, ORDINARY);
                     let slow = naive_matches(p, n, 0, 0);
                     assert_eq!(fast, slow, "pattern {p:?} name {n:?}");
                     checked += 1;
@@ -307,8 +314,8 @@ fn the_worst_case_over_the_proof_domain_is_what_the_unwind_bounds_are_set_from()
                         v /= NAME.len() as u64;
                     }
                     let bucket = plen.max(nlen);
-                    for dot in [LeadingDot::Special, LeadingDot::Ordinary] {
-                        let steps = match_steps(&pattern[..plen], &name[..nlen], dot).steps;
+                    for options in BOTH_DOT_RULES {
+                        let steps = match_steps(&pattern[..plen], &name[..nlen], options).steps;
                         worst[bucket] = worst[bucket].max(steps);
                     }
                 }
@@ -338,7 +345,7 @@ fn the_pathological_pattern_stays_inside_its_bound() {
     const NAME_BYTES: usize = if cfg!(miri) { 2_000 } else { 100_000 };
     let name = [b'a'; NAME_BYTES];
     let pattern = b"a*a*a*a*a*a*a*a*a*a*b";
-    let outcome = match_steps(pattern, &name[..], LeadingDot::Ordinary);
+    let outcome = match_steps(pattern, &name[..], ORDINARY);
     let (hit, steps) = (outcome.matched, outcome.steps);
     assert!(!hit);
     assert!(
@@ -365,7 +372,7 @@ fn a_star_followed_by_a_long_tail_stays_polynomial() {
     pattern[0] = b'*';
     pattern[PATTERN_BYTES - 1] = b'b';
 
-    let outcome = match_steps(&pattern[..], &name[..], LeadingDot::Ordinary);
+    let outcome = match_steps(&pattern[..], &name[..], ORDINARY);
     let (hit, steps) = (outcome.matched, outcome.steps);
     assert!(!hit);
     assert!(steps <= step_bound(pattern.len(), NAME_BYTES));
@@ -377,7 +384,7 @@ fn a_star_followed_by_a_long_tail_stays_polynomial() {
 fn a_pattern_full_of_open_brackets_stays_inside_its_bound() {
     let pattern = [b'['; 400];
     let name = [b'['; 400];
-    let outcome = match_steps(&pattern[..], &name[..], LeadingDot::Ordinary);
+    let outcome = match_steps(&pattern[..], &name[..], ORDINARY);
     let (hit, steps) = (outcome.matched, outcome.steps);
     assert!(hit);
     assert!(steps <= step_bound(pattern.len(), name.len()));
@@ -395,8 +402,8 @@ fn the_step_bound_saturates() {
 /// above would pass on a counter that never moved.
 #[test]
 fn the_step_count_grows_with_the_work() {
-    let short = match_steps(b"*b", b"aaaa", LeadingDot::Ordinary).steps;
-    let long = match_steps(b"*b", b"aaaaaaaaaaaaaaaa", LeadingDot::Ordinary).steps;
+    let short = match_steps(b"*b", b"aaaa", ORDINARY).steps;
+    let long = match_steps(b"*b", b"aaaaaaaaaaaaaaaa", ORDINARY).steps;
     assert!(long > short);
     assert!(short > 0);
 }
@@ -415,7 +422,7 @@ fn the_step_count_grows_with_the_work() {
 /// member in front of the range separates them.
 #[test]
 fn each_class_feature_costs_its_own_scan() {
-    let steps = |p: &[u8], n: &[u8]| match_steps(p, n, LeadingDot::Special).steps;
+    let steps = |p: &[u8], n: &[u8]| match_steps(p, n, MatchOptions::new()).steps;
     assert_eq!(
         steps(b"[!b]", b"a"),
         steps(b"[b]", b"b") + 1,
@@ -470,4 +477,259 @@ fn a_range_admits_neither_its_hyphen_nor_a_reversed_endpoint() {
     // spelling that tells the two apart.
     assert!(!matches(b"[z-a]", b"a"));
     assert!(!matches(b"[z-a]", b"z"));
+}
+
+// ---- the common traits -------------------------------------------------------------------
+
+/// The public types hash, so a caller can key a cache by policy or by result. Compiled here
+/// rather than only promised: a removed derive fails this build, and equal values hash equally.
+#[test]
+fn the_public_types_hash_consistently_with_equality() {
+    use core::hash::{Hash, Hasher};
+    /// Fowler-Noll-Vo, 64-bit: a hasher small enough to write here, since the crate has no `std`.
+    struct Fnv(u64);
+    impl Hasher for Fnv {
+        fn finish(&self) -> u64 {
+            self.0
+        }
+        fn write(&mut self, bytes: &[u8]) {
+            for &byte in bytes {
+                self.0 = (self.0 ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+    }
+    fn hash_of<T: Hash>(value: &T) -> u64 {
+        let mut hasher = Fnv(0xcbf2_9ce4_8422_2325);
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+    assert_eq!(hash_of(&LeadingDot::Special), hash_of(&LeadingDot::Special));
+    assert_ne!(hash_of(&LeadingDot::Special), hash_of(&ORDINARY));
+    let hit = match_steps(b"*.txt", b"notes.txt", MatchOptions::new());
+    let miss = match_steps(b"*.txt", b"notes.md", MatchOptions::new());
+    assert_eq!(hash_of(&hit), hash_of(&hit.clone()));
+    assert_ne!(hash_of(&hit), hash_of(&miss));
+}
+
+// ---- the options -------------------------------------------------------------------------
+
+/// `MatchOptions::default()` is exactly what `matches` does. A `Default` that disagreed with the
+/// plain function would stay wrong until a major release, so the two are compared on every
+/// corner of the leading-dot rule.
+#[test]
+fn the_default_options_are_what_matches_uses() {
+    assert_eq!(MatchOptions::default(), MatchOptions::new());
+    assert_eq!(MatchOptions::new().leading_dot, LeadingDot::Special);
+    for pattern in [&b"*"[..], b".*", b"[.]*", br"\.*", b"?*", b"*.txt", b""] {
+        for name in [&b".config"[..], b"notes.txt", b".", b""] {
+            assert_eq!(
+                matches(pattern, name),
+                matches_with(pattern, name, MatchOptions::default()),
+                "pattern {pattern:?} name {name:?}"
+            );
+        }
+    }
+}
+
+/// Each `with_` method changes its own field and leaves the others alone.
+#[test]
+fn a_with_method_changes_one_rule() {
+    let options = MatchOptions::new().with_leading_dot(LeadingDot::Ordinary);
+    assert_eq!(options.leading_dot, LeadingDot::Ordinary);
+    assert_eq!(
+        options.with_leading_dot(LeadingDot::Special),
+        MatchOptions::new()
+    );
+}
+
+// ---- the case fold -----------------------------------------------------------------------
+
+#[test]
+fn the_case_fold_matches_either_case_of_an_ascii_letter() {
+    let folded = MatchOptions::new().with_case(Case::AsciiInsensitive);
+    // A literal, in both directions.
+    assert!(matches_with(b"*.txt", b"NOTES.TXT", folded));
+    assert!(matches_with(b"*.TXT", b"notes.txt", folded));
+    assert!(matches_with(br"\N*", b"notes", folded));
+    assert!(!matches(b"*.txt", b"NOTES.TXT"));
+    // A set, a range and a negation.
+    assert!(matches_with(b"[abc]", b"B", folded));
+    assert!(matches_with(b"[A-C]", b"b", folded));
+    assert!(!matches_with(b"[a-c]", b"D", folded));
+    assert!(!matches_with(b"[!a]", b"A", folded));
+    assert!(!matches_with(b"[!A]", b"a", folded));
+    assert!(matches_with(b"[!a]", b"b", folded));
+    // Only ASCII letters fold: the bytes beside them in the table, and non-ASCII bytes, do not.
+    assert!(!matches_with(b"@", b"`", folded));
+    assert!(!matches_with(b"[", b"{", folded));
+    assert!(!matches_with(
+        "\u{e9}".as_bytes(),
+        "\u{c9}".as_bytes(),
+        folded
+    ));
+    // The dot rule is untouched.
+    assert!(!matches_with(b"*", b".Config", folded));
+    assert!(matches_with(b".c*", b".Config", folded));
+}
+
+/// **Under the fold, a negated class rejects a letter when either case of it is a member.** The fold
+/// applies before the negation, as glibc's `fnmatch(3)` does with `FNM_CASEFOLD`, so `[!a]` turns
+/// away both cases of `a`. Pinned so the order cannot drift.
+#[test]
+fn the_case_fold_applies_before_a_negation() {
+    assert!(!matches_with(b"[!a]", b"a", FOLDED));
+    assert!(!matches_with(b"[!a]", b"A", FOLDED));
+    assert!(!matches_with(b"[!A]", b"a", FOLDED));
+}
+
+/// The fold charges a step for what it charges without one, so the bound holds unchanged on the
+/// shapes that make a matcher work hardest.
+#[test]
+fn the_case_fold_stays_under_the_bound() {
+    let long = [b'A'; 4096];
+    for (pattern, name) in [
+        (&b"a*a*a*a*a*a*a*a*a*a*b"[..], &long[..]),
+        (b"[a-c]*[!x]", b"BxxxxQ"),
+        (b"*.txt", b"NOTES.TXT"),
+    ] {
+        let folded = match_steps(pattern, name, FOLDED);
+        assert!(folded.steps <= step_bound(pattern.len(), name.len()));
+    }
+}
+
+/// **The greedy matcher agrees with exhaustive search under the case fold**, over every pattern
+/// of length 0..=4 over `a`, `B`, `*`, `?`, `[`, `]`, `!`, `-` against every name of length
+/// 0..=3 over `A`, `b`, `-`. The alphabets put each letter in the other case on the two sides,
+/// so every hit on a letter is a hit through the fold.
+#[test]
+fn greedy_agrees_with_exhaustive_search_under_the_case_fold() {
+    const PAT: &[u8] = b"aB*?[]!-";
+    const NAME: &[u8] = b"Ab-";
+
+    let mut pattern = [0u8; 4];
+    let mut name = [0u8; 3];
+    let mut hits = 0u64;
+    let stride: usize = if cfg!(miri) { 61 } else { 1 };
+    for plen in 0..=4usize {
+        for pc in (0..PAT.len().pow(plen as u32)).step_by(stride) {
+            let mut v = pc;
+            for slot in pattern.iter_mut().take(plen) {
+                *slot = PAT[v % PAT.len()];
+                v /= PAT.len();
+            }
+            let p = &pattern[..plen];
+            for nlen in 0..=3usize {
+                for nc in 0..NAME.len().pow(nlen as u32) {
+                    let mut v = nc;
+                    for slot in name.iter_mut().take(nlen) {
+                        *slot = NAME[v % NAME.len()];
+                        v /= NAME.len();
+                    }
+                    let n = &name[..nlen];
+                    let fast = matches_with(p, n, FOLDED);
+                    let slow = matches_naively(p, n, 0, 0, Case::AsciiInsensitive);
+                    assert_eq!(fast, slow, "pattern {p:?} name {n:?}");
+                    hits += u64::from(fast && p.iter().any(u8::is_ascii_alphabetic));
+                }
+            }
+        }
+    }
+    // Not vacuous: some patterns with a letter in them matched, which only the fold allows.
+    assert!(hits > 0, "{hits} matches through the fold");
+}
+
+// ---- the prepared pattern ----------------------------------------------------------------
+
+/// **A prepared pattern agrees with the plain functions**, under both leading-dot rules and both
+/// case rules, over every pattern of length 0..=4 over `a`, `B`, `.`, `*`, `?`, `[`, `]`, `!`,
+/// `-`, `\` against every name of length 0..=3 over `A`, `b`, `.`, `-`. The alphabets reach a
+/// tail after the last `*` of every width, a class and an escape in it, a dotfile, and the fold.
+#[test]
+fn a_prepared_pattern_agrees_with_the_plain_functions() {
+    const PAT: &[u8] = b"aB.*?[]!-\\";
+    const NAME: &[u8] = b"Ab.-";
+
+    let every_option = [
+        MatchOptions::new(),
+        ORDINARY,
+        MatchOptions::new().with_case(Case::AsciiInsensitive),
+        FOLDED,
+    ];
+    let mut pattern = [0u8; 4];
+    let mut name = [0u8; 3];
+    let mut checked = 0u64;
+    let mut hits = 0u64;
+    let stride: usize = if cfg!(miri) { 61 } else { 1 };
+    for plen in 0..=4usize {
+        for pc in (0..PAT.len().pow(plen as u32)).step_by(stride) {
+            let mut v = pc;
+            for slot in pattern.iter_mut().take(plen) {
+                *slot = PAT[v % PAT.len()];
+                v /= PAT.len();
+            }
+            let p = &pattern[..plen];
+            let prepared = Pattern::new(p);
+            for nlen in 0..=3usize {
+                for nc in 0..NAME.len().pow(nlen as u32) {
+                    let mut v = nc;
+                    for slot in name.iter_mut().take(nlen) {
+                        *slot = NAME[v % NAME.len()];
+                        v /= NAME.len();
+                    }
+                    let n = &name[..nlen];
+                    for options in every_option {
+                        let plain = matches_with(p, n, options);
+                        assert_eq!(
+                            prepared.matches_with(n, options),
+                            plain,
+                            "pattern {p:?} name {n:?} {options:?}"
+                        );
+                        checked += 1;
+                        hits += u64::from(plain);
+                    }
+                    assert_eq!(prepared.matches(n), matches(p, n));
+                }
+            }
+        }
+    }
+    // Not vacuous: both answers occur often.
+    assert!(
+        hits > 10_000 && hits < checked - 10_000,
+        "{hits} of {checked}"
+    );
+}
+
+/// The shapes the prepared form is for, at length: the same answers as the plain functions.
+#[test]
+fn a_prepared_pattern_agrees_at_length() {
+    let mut tail = [b'?'; 65];
+    tail[0] = b'*';
+    tail[64] = b'b';
+    let mut long = [b'a'; 4096];
+    for (pattern, name_end) in [
+        (&tail[..], b'b'),
+        (&tail[..], b'a'),
+        (&b"a*a*a*a*a*a*a*a*a*a*b"[..], b'b'),
+        (b"a*a*a*a*a*a*a*a*a*a*b", b'a'),
+        (b"*[!a]", b'b'),
+    ] {
+        long[4095] = name_end;
+        assert_eq!(
+            Pattern::new(pattern).matches_with(&long, ORDINARY),
+            matches_with(pattern, &long, ORDINARY),
+            "pattern {pattern:?} ending {name_end}"
+        );
+    }
+    // And the tail shape does match a name that ends in its literal.
+    long[4095] = b'b';
+    assert!(Pattern::new(&tail).matches_with(&long, ORDINARY));
+}
+
+#[test]
+fn the_case_fold_charges_its_second_pass_over_a_class() {
+    // `[a]` costs three pattern bytes to scan. Against a letter the fold scans it again for the
+    // other case, and the step count says so; a byte with no other case costs no second pass.
+    assert_eq!(match_steps(b"[a]", b"a", ORDINARY).steps, 3);
+    assert_eq!(match_steps(b"[a]", b"A", FOLDED).steps, 6);
+    assert_eq!(match_steps(b"[1]", b"1", FOLDED).steps, 3);
 }
