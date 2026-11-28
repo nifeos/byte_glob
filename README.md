@@ -127,6 +127,10 @@ cargo +nightly fuzz run byte_glob_matches   # cargo-fuzz; checks against a separ
 ## BUGS
 
 - The harnesses do not quantify over length.
+- `Pattern` has no Kani proof. Comparing it with the plain match ran out of memory past 28
+  gigabytes even with patterns and names of two bytes. It rests on an exhaustive host test of
+  every pattern up to four bytes and every name up to three, under every rule, and on the fuzz
+  target.
 
 ## Minimum Rust version
 

@@ -572,6 +572,16 @@ fn the_case_fold_matches_either_case_of_an_ascii_letter() {
     assert!(matches_with(b".c*", b".Config", folded));
 }
 
+/// **Under the fold, a negated class rejects a letter when either case of it is a member.** The fold
+/// applies before the negation, as glibc's `fnmatch(3)` does with `FNM_CASEFOLD`, so `[!a]` turns
+/// away both cases of `a`. Pinned so the order cannot drift.
+#[test]
+fn the_case_fold_applies_before_a_negation() {
+    assert!(!matches_with(b"[!a]", b"a", FOLDED));
+    assert!(!matches_with(b"[!a]", b"A", FOLDED));
+    assert!(!matches_with(b"[!A]", b"a", FOLDED));
+}
+
 /// The fold charges a step for what it charges without one, so the bound holds unchanged on the
 /// shapes that make a matcher work hardest.
 #[test]
