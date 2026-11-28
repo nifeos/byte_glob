@@ -3,7 +3,8 @@ Falsifies `byte_glob::verification::the_case_fold_ignores_the_case_of_the_name`.
 The defect: under the case fold, `folded_class` never asks the bracket expression about the other case of
 the name's byte, so `[a]` matches `a` but not `A` while a literal `a` matches both.
 
-Expected to fail: the harness's `assert_eq!` of the match on the name and on the lowercased name.
+Expected to fail: the harness's `assert_eq!` of the element decoded for the name's byte and for its
+lowercase.
 
 diff --git a/src/lib.rs b/src/lib.rs
 --- a/src/lib.rs
